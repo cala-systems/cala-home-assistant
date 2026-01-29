@@ -12,116 +12,70 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import (
     UnitOfTemperature,
     UnitOfEnergy,
-    PERCENTAGE,
 )
 
 from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL
 
 _LOGGER = logging.getLogger(__name__)
 
-# Matches what your firmware is actually reporting (from the log you pasted)
 TELEMETRY_FIELDS = {
-    "topTankTemp": {
-        "name": "Top Tank Temp",
+    "top_c": {
+        "name": "Top Temperature",
         "unit": UnitOfTemperature.CELSIUS,
         "device_class": SensorDeviceClass.TEMPERATURE,
     },
-    "upperTankTemp": {
-        "name": "Upper Tank Temp",
+    "upper_c": {
+        "name": "Upper Temperature",
         "unit": UnitOfTemperature.CELSIUS,
         "device_class": SensorDeviceClass.TEMPERATURE,
     },
-    "lowerTankTemp": {
-        "name": "Lower Tank Temp",
+    "lower_c": {
+        "name": "Lower Temperature",
         "unit": UnitOfTemperature.CELSIUS,
         "device_class": SensorDeviceClass.TEMPERATURE,
     },
-    "ambientTemp": {
-        "name": "Ambient Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "ambientHumidity": {
-        "name": "Ambient Humidity",
-        "unit": PERCENTAGE,
+    "gallons_available": {
+        "name": "Gallons Available",
+        "unit": "gal",
         "device_class": None,
     },
-    "deliveryTemp": {
-        "name": "Delivery Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "dischargeTemp": {
-        "name": "Discharge Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "suctionLineTemp": {
-        "name": "Suction Line Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "liquidLineTemp": {
-        "name": "Liquid Line Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "energyUsed": {
-        "name": "Energy Used",
-        "unit": UnitOfEnergy.KILO_WATT_HOUR,
-        "device_class": SensorDeviceClass.ENERGY,
-    },
-    "compFreq": {
+    "compressor_hz": {
         "name": "Compressor Frequency",
         "unit": "Hz",
         "device_class": None,
     },
-    "hotLiters": {
-        "name": "Hot Liters Available",
-        "unit": "L",
-        "device_class": None,
-    },
-    "userMaxTemp": {
-        "name": "User Max Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "userDesiredTemp": {
-        "name": "User Desired Temp",
-        "unit": UnitOfTemperature.CELSIUS,
-        "device_class": SensorDeviceClass.TEMPERATURE,
-    },
-    "uptime": {
-        "name": "Uptime",
-        "unit": "s",
-        "device_class": None,
+    "energy_used_kwh": {
+        "name": "Energy Used",
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+        "device_class": SensorDeviceClass.ENERGY,
     },
 }
 
 BINARY_FIELDS = {
-    "upperElementPwr": "Upper Element Power",
-    "lowerElementPwr": "Lower Element Power",
-    "fanPwr": "Fan Power",
-    "compPwr": "Compressor Power",
-    "compRunning": "Compressor Running",
-    "inBoostMode": "Boost Mode",
-    "safetyLockout": "Safety Lockout",
+    "upper_element_on": "Upper Element On",
+    "lower_element_on": "Lower Element On",
+    "boost_mode_on": "Boost Mode On",
 }
 
 
-def _extract_reported(payload: Any) -> dict[str, Any] | None:
-    """Supports either flat telemetry or AWS shadow style state.reported."""
-    if not isinstance(payload, dict):
-        return None
+def _payload_to_str(payload: Any) -> str:
+    """
+    Normalizing MQTT payload into a JSON string.
+    """
+    if payload is None:
+        return ""
 
-    state = payload.get("state")
-    if isinstance(state, dict):
-        reported = state.get("reported")
-        if isinstance(reported, dict):
-            return reported
+    if isinstance(payload, (bytes, bytearray)):
+        return payload.decode("utf-8", errors="replace")
 
-    # fallback: treat as already-flat telemetry dict
-    return payload
+    if isinstance(payload, memoryview):
+        return payload.tobytes().decode("utf-8", errors="replace")
+
+    if isinstance(payload, str):
+        return payload
+
+    # Last resort: stringify whatever it is
+    return str(payload)
 
 
 class CalaBase:
@@ -179,23 +133,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(sensors + binaries)
 
     async def message_received(msg):
+        raw = _payload_to_str(msg.payload)
+
         try:
-            raw = msg.payload.decode("utf-8", errors="replace")
             payload = json.loads(raw)
         except Exception as e:
-            _LOGGER.warning("Invalid JSON on %s: %s (%s)", state_topic, msg.payload, e)
+            _LOGGER.warning("Invalid JSON on %s: %s (%s)", state_topic, raw, e)
             return
 
-        reported = _extract_reported(payload)
-        if not isinstance(reported, dict):
+        if not isinstance(payload, dict):
+            _LOGGER.warning("Unexpected payload type on %s: %s", state_topic, type(payload))
             return
 
         for s in sensors:
-            s.update_from_payload(reported)
+            s.update_from_payload(payload)
             s.async_write_ha_state()
 
         for b in binaries:
-            b.update_from_payload(reported)
+            b.update_from_payload(payload)
             b.async_write_ha_state()
 
-    await mqtt.async_subscribe(hass, state_topic, message_received, qos=1)
+    await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
