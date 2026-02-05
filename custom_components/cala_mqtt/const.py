@@ -7,6 +7,7 @@ CONF_COMMAND_TOPIC = "command_topic"
 
 CONF_PAIRING_CODE = "pairing_code"
 CONF_PAIRING_TOKEN = "pairing_token"
+CONF_ESP_PAIRING_URL = "esp_pairing_url"
 CONF_BROKER_HOST = "broker_host"
 CONF_BROKER_PORT = "broker_port"
 

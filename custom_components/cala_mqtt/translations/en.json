@@ -3,6 +3,13 @@
   "config": {
     "abort": {
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "esp_pairing_url": "ESP pairing URL (optional)"
+        }
+      }
     }
   }
 }

@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from urllib.parse import urlparse
 
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import mqtt
@@ -17,6 +19,7 @@ from .const import (
     CONF_AVAILABILITY_TOPIC,
     CONF_PAIRING_CODE,
     CONF_PAIRING_TOKEN,
+    CONF_ESP_PAIRING_URL,
     CONF_BROKER_HOST,
     CONF_BROKER_PORT,
     DEFAULT_STATE_TOPIC_TPL,
@@ -39,6 +42,16 @@ async def _mqtt_available(hass) -> bool:
     if hasattr(mqtt, "async_get_client"):
         return mqtt.async_get_client(hass) is not None
     return False
+
+
+def _broker_host_port_from_hass(hass) -> tuple[str, int]:
+    """Infer MQTT broker host and port from HA config (e.g. same host as HA, port 1883)."""
+    url = hass.config.internal_url or hass.config.external_url or ""
+    if url:
+        parsed = urlparse(url)
+        if parsed.hostname:
+            return (parsed.hostname, 1883)
+    return ("homeassistant.local", 1883)
 
 
 def _safe_json_loads(payload: bytes | str) -> dict | None:
@@ -111,6 +124,48 @@ def _extract_pairing_fields(device_id: str, device_name: str, resp: dict) -> dic
 class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    async def async_step_zeroconf(self, discovery_info):
+        """Handle Zeroconf discovery."""
+        _LOGGER.info("CALA DISCOVERED VIA ZEROCONF: %s", discovery_info)
+
+        # IMPORTANT: do not auto-create the entry yet
+        # Always show the pairing form first
+        self._discovery_info = discovery_info
+
+        # Always show pairing form for now
+        return self.async_show_form(
+            step_id="pair",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("pairing_code"): str
+                }
+            ),
+            description_placeholders={
+                "device_id": discovery_info.properties.get("device_id", "unknown")
+            },
+        )
+
+    async def async_step_pair(self, user_input=None):
+        if user_input is not None:
+            # For now, just succeed
+            return self.async_create_entry(
+                title="Cala Water Heater",
+                data={
+                    "device_id": self._discovery_info.properties.get("device_id"),
+                    "host": self._discovery_info.host,
+                    "port": self._discovery_info.port,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="pair",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("pairing_code"): str
+                }
+            ),
+        )
+
     async def async_step_user(self, user_input=None):
         if not await _mqtt_available(self.hass):
             return self.async_abort(reason="mqtt_not_configured")
@@ -131,74 +186,119 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(device_id)
                 self._abort_if_unique_id_configured()
 
-                pair_request_topic = PAIR_REQUEST_TOPIC_TPL.format(device_id=device_id)
-                pair_accepted_topic = PAIR_ACCEPTED_TOPIC_TPL.format(device_id=device_id)
+                esp_url = (user_input.get(CONF_ESP_PAIRING_URL) or "").strip()
+                ha_url = self.hass.config.internal_url or self.hass.config.external_url
+                broker_host, broker_port = _broker_host_port_from_hass(self.hass)
 
-                loop = asyncio.get_running_loop()
-                fut: asyncio.Future[dict] = loop.create_future()
-
-                def _on_msg(msg):
-                    resp = _safe_json_loads(msg.payload)
-                    if not isinstance(resp, dict):
-                        return
-
-                    accepted = resp.get("accepted")
-                    status = resp.get("status")
-                    if accepted is True or (isinstance(status, str) and status.lower() == "accepted"):
-                        resp_device_id = resp.get("device_id")
-                        if resp_device_id and str(resp_device_id) != device_id:
-                            return
-                        if not fut.done():
-                            fut.set_result(resp)
-
-                unsubscribe = await mqtt.async_subscribe(
-                    self.hass, pair_accepted_topic, _on_msg, qos=1
-                )
-
-                try:
-                    # HA URL only if configured
-                    ha_url = self.hass.config.internal_url or self.hass.config.external_url
-
+                if esp_url:
+                    # Send pairing code and MQTT broker info to ESP over HTTP (no auth).
+                    # ESP will then connect to HA's MQTT broker.
                     request_payload = {
                         "device_id": device_id,
                         "pairing_code": pairing_code,
                         "ha": {
                             "name": self.hass.config.location_name or "Home Assistant",
                         },
+                        "mqtt": {
+                            "host": broker_host,
+                            "port": broker_port,
+                        },
                     }
                     if ha_url:
                         request_payload["ha"]["url"] = ha_url
 
-                    await mqtt.async_publish(
-                        self.hass,
-                        pair_request_topic,
-                        json.dumps(request_payload),
-                        qos=1,
-                        retain=False,
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(
+                                esp_url,
+                                json=request_payload,
+                                timeout=aiohttp.ClientTimeout(total=PAIRING_TIMEOUT_S),
+                            ) as response:
+                                if response.status != 200:
+                                    errors["base"] = "cannot_connect"
+                                else:
+                                    body = await response.text()
+                                    resp = _safe_json_loads(body)
+                                    if isinstance(resp, dict) and (
+                                        resp.get("accepted") is True
+                                        or (isinstance(resp.get("status"), str) and resp.get("status", "").lower() == "accepted")
+                                    ):
+                                        data = _extract_pairing_fields(device_id, device_name, resp)
+                                        return self.async_create_entry(title=device_name, data=data)
+                                    errors["base"] = "cannot_connect"
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        errors["base"] = "cannot_connect"
+                    except Exception:
+                        _LOGGER.exception("Unexpected error during Cala HTTP pairing")
+                        errors["base"] = "cannot_connect"
+                else:
+                    # Device already on MQTT: send pair request via MQTT and wait for pair/accepted.
+                    pair_request_topic = PAIR_REQUEST_TOPIC_TPL.format(device_id=device_id)
+                    pair_accepted_topic = PAIR_ACCEPTED_TOPIC_TPL.format(device_id=device_id)
+
+                    loop = asyncio.get_running_loop()
+                    fut: asyncio.Future[dict] = loop.create_future()
+
+                    def _on_msg(msg):
+                        resp = _safe_json_loads(msg.payload)
+                        if not isinstance(resp, dict):
+                            return
+
+                        accepted = resp.get("accepted")
+                        status = resp.get("status")
+                        if accepted is True or (isinstance(status, str) and status.lower() == "accepted"):
+                            resp_device_id = resp.get("device_id")
+                            if resp_device_id and str(resp_device_id) != device_id:
+                                return
+                            if not fut.done():
+                                fut.set_result(resp)
+
+                    unsubscribe = await mqtt.async_subscribe(
+                        self.hass, pair_accepted_topic, _on_msg, qos=1
                     )
 
-                    resp = await asyncio.wait_for(fut, timeout=PAIRING_TIMEOUT_S)
-
-                except asyncio.TimeoutError:
-                    errors["base"] = "cannot_connect"
-                except Exception:
-                    _LOGGER.exception("Unexpected error during Cala pairing flow")
-                    errors["base"] = "cannot_connect"
-                finally:
                     try:
-                        unsubscribe()
-                    except Exception:
-                        pass
+                        request_payload = {
+                            "device_id": device_id,
+                            "pairing_code": pairing_code,
+                            "ha": {
+                                "name": self.hass.config.location_name or "Home Assistant",
+                            },
+                        }
+                        if ha_url:
+                            request_payload["ha"]["url"] = ha_url
 
-                if not errors:
-                    data = _extract_pairing_fields(device_id, device_name, resp)
-                    return self.async_create_entry(title=device_name, data=data)
+                        await mqtt.async_publish(
+                            self.hass,
+                            pair_request_topic,
+                            json.dumps(request_payload),
+                            qos=1,
+                            retain=False,
+                        )
+
+                        resp = await asyncio.wait_for(fut, timeout=PAIRING_TIMEOUT_S)
+
+                    except asyncio.TimeoutError:
+                        errors["base"] = "cannot_connect"
+                    except Exception:
+                        _LOGGER.exception("Unexpected error during Cala pairing flow")
+                        errors["base"] = "cannot_connect"
+                    finally:
+                        try:
+                            unsubscribe()
+                        except Exception:
+                            pass
+
+                    if not errors:
+                        data = _extract_pairing_fields(device_id, device_name, resp)
+                        return self.async_create_entry(title=device_name, data=data)
 
         schema = vol.Schema(
             {
                 vol.Optional(CONF_DEVICE_NAME, default=""): str,
                 vol.Required(CONF_DEVICE_ID, default=""): str,
                 vol.Required(CONF_PAIRING_CODE, default=""): str,
+                vol.Optional(CONF_ESP_PAIRING_URL, default=""): str,
             }
         )
 
