@@ -118,7 +118,7 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     device_id = entry.data["device_id"]
-    device_name = entry.data["device_name"]
+    device_name = 'Cala Water Heater'
     state_topic = entry.data["state_topic"]
 
     sensors: list[SensorEntity] = [
