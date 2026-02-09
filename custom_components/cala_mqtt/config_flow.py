@@ -13,7 +13,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-DOMAIN = "cala_mqtt"
+
 
 class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1

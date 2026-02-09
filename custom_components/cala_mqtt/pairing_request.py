@@ -1,4 +1,3 @@
-from urllib.parse import urlparse
 import aiohttp
 import logging
 import json

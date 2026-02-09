@@ -1,3 +1,6 @@
+from homeassistant.components import mqtt
+
+
 async def _mqtt_available(hass) -> bool:
     """Return True if an MQTT client is available."""
     if hasattr(mqtt, "async_wait_for_mqtt_client"):
