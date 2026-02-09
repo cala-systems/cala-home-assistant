@@ -83,7 +83,7 @@ async def _http_pair(
                     )
                     return (None, "cannot_connect")                
                 data = _extract_pairing_fields(device_id, device_name, resp)
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Cala pairing succeeded: device_id=%s, mqtt_username=%s, password=%s, state_topic=%s, command_topic=%s",
                     device_id,
                     data.get(CONF_MQTT_USERNAME),

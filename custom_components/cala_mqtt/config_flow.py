@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-
 from .pairing_request import _http_pair
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.components import mqtt
 from homeassistant.data_entry_flow import section
 from .mqtt_helper import _mqtt_available
 
 from .const import (
     DOMAIN,
-    CONF_DEVICE_ID,
-    CONF_DEVICE_NAME,
-    CONF_STATE_TOPIC,
-    CONF_COMMAND_TOPIC,
-    CONF_AVAILABILITY_TOPIC,
-    CONF_PAIRING_CODE,
-    CONF_PAIRING_TOKEN,
-    CONF_MQTT_USERNAME,
-    CONF_MQTT_PASSWORD,
-    CONF_BROKER_HOST,
-    CONF_BROKER_PORT,
+    CONF_DEVICE_NAME,    
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,6 +34,10 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not host:
             return self.async_abort(reason="invalid_discovery")
+
+        #TODO: What do we need to pass in here?
+        if not _mqtt_available(self.hass):
+            return self.async_abort(reason="mqtt_not_configured")
 
         self._discovery_info = discovery_info
         self._discovery_host = host
