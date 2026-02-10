@@ -19,8 +19,7 @@
         "title": "Manual setup",
         "description": "Enter the Cala device network details.",
         "data": {
-          "device_host": "Device host or IP address",
-          "device_port": "Device port",
+          "device_host": "Cala host or IP address",
           "device_id": "Device ID"
         }
       },
