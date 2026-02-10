@@ -7,6 +7,8 @@ CONF_COMMAND_TOPIC = "command_topic"
 
 CONF_PAIRING_CODE = "pairing_code"
 CONF_PAIRING_TOKEN = "pairing_token"
+CONF_MQTT_USERNAME = "mqtt_username"
+CONF_MQTT_PASSWORD = "mqtt_password"
 CONF_BROKER_HOST = "broker_host"
 CONF_BROKER_PORT = "broker_port"
 

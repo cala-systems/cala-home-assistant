@@ -118,7 +118,7 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     device_id = entry.data["device_id"]
-    device_name = entry.data["device_name"]
+    device_name = entry.data["device_name"] or f"Cala Water Heater"
     state_topic = entry.data["state_topic"]
 
     sensors: list[SensorEntity] = [
@@ -153,4 +153,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             b.update_from_payload(payload)
             b.async_write_ha_state()
 
-    await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
+    unsubscribe = await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
+    hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribe"] = unsubscribe

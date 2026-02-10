@@ -2,7 +2,40 @@
   "title": "Cala",
   "config": {
     "abort": {
-      "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
+      "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
+      "cala_advertises": "Cala devices advertise themselves on the network. When one is discovered it will appear in the list above. Ensure the device is powered on and on the same network.",
+      "use_zeroconf": "Cala devices advertise themselves on the network. When one is discovered it will appear in the list above. Ensure the device is powered on and on the same network.",
+      "invalid_discovery": "Invalid discovery information. Please try again."
+    },
+    "step": {
+      "pair": {
+        "data": {
+          "pairing_code": "Pairing code"
+        },
+        "description": "Enter the pairing code shown on the Cala device (device_id: {device_id})."
+      },
+      "provision": {
+        "description": "To pair your Cala you need to get the pairing code from the device: Settings → Advanced → Home Assistant.\nPlease create a unique MQTT username and password in your MQTT broker. Enter those credentials here.",
+        "data": {
+          "provisioning_code": "Provisioning code",
+          "mqtt_username": "MQTT username",
+          "mqtt_password": "MQTT password"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Broker host and port. Most users can leave these as default.",
+            "data": {
+              "mqtt_broker": "MQTT broker",
+              "mqtt_port": "MQTT port"
+            }
+          }
+        },
+        "errors": {
+          "provisioning_failed": "Provisioning failed. Please try again.",
+          "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
+        }
+      }
     }
   }
 }
