@@ -6,6 +6,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import section
 from .mqtt_helper import _mqtt_available
+from .options_flow import CalaOptionsFlowHandler
 
 from .const import (
     DOMAIN,
@@ -107,3 +108,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="provision",
             data_schema=self._provision_schema(),
         )
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return CalaOptionsFlowHandler()
