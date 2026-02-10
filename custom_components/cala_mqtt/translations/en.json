@@ -3,11 +3,27 @@
   "config": {
     "abort": {
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
-      "cala_advertises": "Cala devices advertise themselves on the network. When one is discovered it will appear in the list above. Ensure the device is powered on and on the same network.",
+      "invalid_discovery": "Invalid discovery information. Please try again.",
       "use_zeroconf": "Cala devices advertise themselves on the network. When one is discovered it will appear in the list above. Ensure the device is powered on and on the same network.",
-      "invalid_discovery": "Invalid discovery information. Please try again."
+      "invalid_host": "A valid device host is required.",
+      "invalid_device_id": "A valid device ID is required."
     },
     "step": {
+      "user": {
+        "menu_options": {
+          "discovery": "Discovery (recommended)",
+          "manual": "Manual setup"
+        }
+      },
+      "manual": {
+        "title": "Manual setup",
+        "description": "Enter the Cala device network details.",
+        "data": {
+          "device_host": "Device host or IP address",
+          "device_port": "Device port",
+          "device_id": "Device ID"
+        }
+      },
       "pair": {
         "data": {
           "pairing_code": "Pairing code"
