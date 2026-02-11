@@ -120,6 +120,13 @@ def _safe_json_loads(payload: bytes | str) -> dict | None:
 
 def _extract_pairing_fields(device_id: str, device_name: str, resp: dict) -> dict:
     """Normalize the device pairing response into entry.data"""
+    resp_device_id = resp.get("device_id") or resp.get("id")
+    if isinstance(resp_device_id, str) and resp_device_id.strip():
+        device_id = resp_device_id.strip()
+
+    resp_device_name = resp.get("device_name") or resp.get("name")
+    if isinstance(resp_device_name, str) and resp_device_name.strip():
+        device_name = resp_device_name.strip()
     topics = resp.get("topics") if isinstance(resp.get("topics"), dict) else {}
     mqtt_creds = resp.get("mqtt") if isinstance(resp.get("mqtt"), dict) else {}
     # topic_prefix can be at top level, under topics, or under mqtt (e.g. mqtt.topic_prefix)

@@ -20,3 +20,6 @@ DEVICE_MODEL = "Cala Water Heater"
 
 CONF_AVAILABILITY_TOPIC = "availability_topic"
 DEFAULT_AVAILABILITY_TOPIC_TPL = "cala/{device_id}/availability"
+
+CONF_DEVICE_HOST = "device_host"
+CONF_DEVICE_PORT = "device_port"
