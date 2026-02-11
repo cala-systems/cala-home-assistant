@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-HOST="root@192.168.1.106"
+# House
+HOST="root@192.168.103.184"
+# Office
+# HOST="root@192.168.1.106"
 COMPONENT="cala_mqtt"
 DEST="/config/custom_components"
 

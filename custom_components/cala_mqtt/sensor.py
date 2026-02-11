@@ -12,6 +12,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import (
     UnitOfTemperature,
     UnitOfEnergy,
+    UnitOfVolumeFlowRate,
+    UnitOfVolume
 )
 
 from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL
@@ -36,7 +38,7 @@ TELEMETRY_FIELDS = {
     },
     "gallons_available": {
         "name": "Gallons Available",
-        "unit": "gal",
+        "unit": UnitOfVolume.GALLONS,
         "device_class": None,
     },
     "compressor_hz": {
@@ -49,6 +51,12 @@ TELEMETRY_FIELDS = {
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
         "device_class": SensorDeviceClass.ENERGY,
     },
+    "gallons_used": {
+        "name": "Gallons Used",
+        "unit": UnitOfVolume.GALLONS,
+        "device_class": None,
+    },
+
 }
 
 BINARY_FIELDS = {
@@ -117,6 +125,7 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    _LOGGER.error("CALA MQTT: sensor.py: async_setup_entry CALLED")
     device_id = entry.data["device_id"]
     device_name = entry.data["device_name"] or f"Cala Water Heater"
     state_topic = entry.data["state_topic"]
