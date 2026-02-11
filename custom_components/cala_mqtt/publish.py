@@ -147,6 +147,7 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
         )
         return
 
+    
     payload = {
         "v": 1,
         "ts": datetime.now(tz=timezone.utc).timestamp(),
@@ -154,6 +155,9 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     }
 
     topic = f"cala/{device_id}/context"
+
+    _LOGGER.info("Cala publish_context: publishing payload=%s", ctx)
+    _LOGGER.info("Cala publish_context: publishing topic=%s", topic)
 
     try:
         await mqtt.async_publish(
@@ -163,7 +167,7 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
             qos=0,
             retain=False,
         )
-        _LOGGER.debug(
+        _LOGGER.info(
             "Published Cala context for %s: %s",
             device_id,
             payload,

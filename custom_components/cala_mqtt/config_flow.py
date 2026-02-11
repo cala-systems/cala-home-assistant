@@ -37,7 +37,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="invalid_discovery")
 
         #TODO: What do we need to pass in here?
-        if not _mqtt_available(self.hass):
+        if not await _mqtt_available(self.hass):
             return self.async_abort(reason="mqtt_not_configured")
 
         self._discovery_info = discovery_info
