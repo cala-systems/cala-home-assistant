@@ -31,7 +31,7 @@ def _entity_id_from_option(value):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _LOGGER.error("CALA MQTT: __init__.py async_setup_entry CALLED")
+    _LOGGER.debug("CALA MQTT: __init__.py async_setup_entry called")
     device_id = entry.data.get("device_id", "?")
     opts = entry.options or {}
     _LOGGER.info(

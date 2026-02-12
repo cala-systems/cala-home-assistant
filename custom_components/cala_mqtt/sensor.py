@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import (
     UnitOfTemperature,
     UnitOfEnergy,
-    UnitOfVolumeFlowRate,
+    UnitOfTime,
     UnitOfVolume
 )
 
@@ -56,13 +56,50 @@ TELEMETRY_FIELDS = {
         "unit": UnitOfVolume.GALLONS,
         "device_class": None,
     },
+    "delivery_c": {
+        "name": "Delivery Temperature",
+        "unit": UnitOfTemperature.CELSIUS,
+        "device_class": SensorDeviceClass.TEMPERATURE,
+    },
+    "ambient_c": {
+        "name": "Ambient Temperature",
+        "unit": UnitOfTemperature.CELSIUS,
+        "device_class": SensorDeviceClass.TEMPERATURE,
+    },
 
+    "uptime_sec": {
+        "name": "Uptime",
+        "unit": UnitOfTime.SECONDS,
+        "device_class": SensorDeviceClass.DURATION,
+    },
+    "wifi_ip": {
+        "name": "WiFi IP",
+        "unit": None,
+        "device_class": None,
+    },
+    "wifi_ssid": {
+        "name": "WiFi SSID",
+        "unit": None,
+        "device_class": None,
+    },
+    "wifi_rssi_dbm": {
+        "name": "WiFi Signal",
+        "unit": "dBm",
+        "device_class": SensorDeviceClass.SIGNAL_STRENGTH,
+    },
+    "fw_version": {
+        "name": "Firmware Version",
+        "unit": None,
+        "device_class": None,
+    },
 }
 
 BINARY_FIELDS = {
     "upper_element_on": "Upper Element On",
     "lower_element_on": "Lower Element On",
     "boost_mode_on": "Boost Mode On",
+    "fan_on": "Fan On",
+    "fan_speed_high": "Fan Speed High",
 }
 
 
@@ -125,7 +162,7 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    _LOGGER.error("CALA MQTT: sensor.py: async_setup_entry CALLED")
+    _LOGGER.debug("CALA MQTT: sensor.py: async_setup_entry called")
     device_id = entry.data["device_id"]
     device_name = entry.data["device_name"] or f"Cala Water Heater"
     state_topic = entry.data["state_topic"]
@@ -154,13 +191,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             _LOGGER.warning("Unexpected payload type on %s: %s", state_topic, type(payload))
             return
 
+        _LOGGER.debug("Received payload on %s: %s", state_topic, payload)idf.
+
         for s in sensors:
-            s.update_from_payload(payload)
-            s.async_write_ha_state()
+            try:
+                s.update_from_payload(payload)
+                s.async_write_ha_state()
+            except Exception as e:
+                _LOGGER.warning("Error updating sensor %s: %s", s._key, e)
 
         for b in binaries:
-            b.update_from_payload(payload)
-            b.async_write_ha_state()
+            try:
+                b.update_from_payload(payload)
+                b.async_write_ha_state()
+            except Exception as e:
+                _LOGGER.warning("Error updating binary sensor %s: %s", b._key, e)
 
     unsubscribe = await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
