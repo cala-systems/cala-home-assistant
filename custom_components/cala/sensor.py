@@ -191,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             _LOGGER.warning("Unexpected payload type on %s: %s", state_topic, type(payload))
             return
 
-        _LOGGER.debug("Received payload on %s: %s", state_topic, payload)idf.
+        _LOGGER.debug("Received payload on %s: %s", state_topic, payload)
 
         for s in sensors:
             try:
