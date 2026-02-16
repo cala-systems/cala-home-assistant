@@ -2,15 +2,12 @@
   "domain": "cala",
   "name": "Cala",
   "version": "0.1.0",
-  "documentation": "https://github.com/cala-systems/home_assistant/#readme",
+  "documentation": "https://github.com/cala-systems/home_assistant",
   "issue_tracker": "https://github.com/cala-systems/home_assistant/issues",
   "requirements": [],
   "dependencies": ["mqtt"],
+  "codeowners": ["@cala-systems"],
   "config_flow": true,
   "iot_class": "local_push",
-  "integration_type": "device",
-  "zeroconf": [
-    { "type": "_cala._tcp.local." }
-  ],
-  "loggers": ["custom_components.cala"]
+  "homeassistant": "2024.6.0"
 }
