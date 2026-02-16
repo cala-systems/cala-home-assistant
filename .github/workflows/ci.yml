@@ -28,7 +28,7 @@ jobs:
           ls -la custom_components/cala/manifest.json
           python -m json.tool custom_components/cala/manifest.json > /dev/null
       - name: HACS validation
-        uses: hacs/action@main
+        uses: hacs/action@v1
         with:
           category: integration
 
