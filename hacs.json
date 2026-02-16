@@ -1,5 +1,4 @@
 {
   "name": "Cala",
-  "zip_release": true,
-  "filename": "cala.zip"
+  "content_in_root": false
 }
