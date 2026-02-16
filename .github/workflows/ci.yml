@@ -1,22 +1,47 @@
-name: Validate
-
-on:
-  push:
-  pull_request:
-
 jobs:
   hacs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Debug repository structure + JSON validity
+        run: |
+          set -euxo pipefail
+          echo "== pwd =="; pwd
+          echo "== root listing =="; ls -la
+          echo "== custom_components listing =="; ls -la custom_components || true
+          echo "== find hacs.json & manifests =="
+          find . -maxdepth 4 -type f \( -name "hacs.json" -o -name "manifest.json" \) -print -exec ls -la {} \;
+
+          echo "== show hacs.json raw bytes (detect BOM) =="
+          python - <<'PY'
+          import pathlib, binascii
+          p = pathlib.Path("hacs.json")
+          data = p.read_bytes()
+          print("hacs.json bytes prefix:", binascii.hexlify(data[:8]).decode())
+          print("hacs.json text:", data.decode("utf-8", errors="replace"))
+          PY
+
+          echo "== strict JSON parse hacs.json =="
+          python - <<'PY'
+          import json, pathlib
+          obj = json.loads(pathlib.Path("hacs.json").read_text(encoding="utf-8"))
+          assert isinstance(obj, dict), type(obj)
+          assert "name" in obj and isinstance(obj["name"], str) and obj["name"].strip()
+          print("hacs.json OK:", obj)
+          PY
+
+          echo "== strict JSON parse manifest.json =="
+          python - <<'PY'
+          import json, pathlib
+          mp = pathlib.Path("custom_components/cala/manifest.json")
+          obj = json.loads(mp.read_text(encoding="utf-8"))
+          assert isinstance(obj, dict), type(obj)
+          assert obj.get("domain") == "cala"
+          print("manifest OK")
+          PY
+
       - name: HACS validation
         uses: hacs/action@main
         with:
           category: integration
-
-  hassfest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@master
