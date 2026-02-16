@@ -11,6 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Debug repo for HACS
+        run: |
+          set -euxo pipefail
+          echo "REF=$GITHUB_REF"
+          echo "SHA=$GITHUB_SHA"
+          echo "Root listing:"
+          ls -la
+          echo "hacs.json:"
+          ls -la hacs.json
+          cat hacs.json
+          echo "custom_components tree:"
+          find custom_components -maxdepth 3 -print
+          echo "manifest.json:"
+          ls -la custom_components/cala/manifest.json
+          python -m json.tool custom_components/cala/manifest.json > /dev/null
       - name: HACS validation
         uses: hacs/action@main
         with:
