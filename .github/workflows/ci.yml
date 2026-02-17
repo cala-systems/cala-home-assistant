@@ -13,8 +13,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: API sanity check (can token read hacs.json?)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          echo "repo=$GITHUB_REPOSITORY ref=$GITHUB_REF_NAME"
+          curl -sS -D /tmp/headers.txt \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}" \
+            -o /tmp/body.json || true
+
+          echo "== status/headers =="
+          sed -n '1,20p' /tmp/headers.txt || true
+          echo "== body (first 300 chars) =="
+          head -c 300 /tmp/body.json; echo
+
       - name: HACS validation
-        uses: hacs/action@22.5.0
+        uses: hacs/action@main
         with:
           category: integration
         env:

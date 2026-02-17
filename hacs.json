@@ -1,5 +1,5 @@
 {
   "name": "Cala",
-  "content_in_root": true,
+  "content_in_root": false,
   "homeassistant": "2024.12.0"
 }
