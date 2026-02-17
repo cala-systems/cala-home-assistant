@@ -30,10 +30,11 @@ jobs:
           echo "manifest.json:"
           ls -la custom_components/cala/manifest.json
           python -m json.tool custom_components/cala/manifest.json > /dev/null
-      - name: HACS validation
+      - name: Run HACS validation
         uses: hacs/action@22.5.0
         with:
           category: integration
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   hassfest:
     runs-on: ubuntu-latest
