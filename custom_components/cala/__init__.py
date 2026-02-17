@@ -13,8 +13,6 @@ PLATFORMS = ["sensor"]
 
 OPTION_KEYS = (
     "solar_production_entity",
-    "grid_import_entity",
-    "grid_export_entity",
     "battery_soc_entity",
 )
 
@@ -52,7 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not tracked_entities:
         _LOGGER.info(
-            "Cala context: no option entities configured (solar/grid/battery); state listener not registered"
+            "Cala context: no option entities configured (solar/battery); state listener not registered"
         )
         return True
 

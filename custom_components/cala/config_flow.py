@@ -175,8 +175,12 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(actual_id)
                 self._abort_if_unique_id_configured()
 
-            # Mark as Pending so sensor starts in Pending (HTTP sent, awaiting first MQTT)
-            entry_data = {**data, "_connection_initial_state": ConnectionStatus.PENDING}
+            entry_data = {
+                **data,
+                CONF_DEVICE_HOST: host,
+                CONF_DEVICE_PORT: port,
+                "_connection_initial_state": ConnectionStatus.PENDING,
+            }
 
             return self.async_create_entry(
                 title=f"Cala Device ({data.get(CONF_DEVICE_NAME, device_id)})",

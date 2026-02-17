@@ -117,19 +117,6 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if solar_w is not None:
             ctx.setdefault("solar", {})["production_w"] = solar_w
 
-    # ---- Grid ----
-    grid_import_entity = opts.get("grid_import_entity")
-    if grid_import_entity:
-        import_w = _normalize_power_w(hass, grid_import_entity)
-        if import_w is not None:
-            ctx.setdefault("grid", {})["import_w"] = import_w
-
-    grid_export_entity = opts.get("grid_export_entity")
-    if grid_export_entity:
-        export_w = _normalize_power_w(hass, grid_export_entity)
-        if export_w is not None:
-            ctx.setdefault("grid", {})["export_w"] = export_w
-
     # ---- Battery ----
     battery_soc_entity = opts.get("battery_soc_entity")
     if battery_soc_entity:
