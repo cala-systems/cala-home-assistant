@@ -82,12 +82,20 @@ jobs:
           print(decoded.decode("utf-8"))
           PY
 
-      - name: HACS validation
-        uses: hacs/action@main
-        with:
-          category: integration
+      - name: HACS validation (pinned container digest)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            -e GITHUB_TOKEN \
+            -e GITHUB_ACTIONS=true \
+            -e CI=true \
+            -e REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e INPUT_CATEGORY=integration \
+            -v "${GITHUB_WORKSPACE}":/github/workspace \
+            ghcr.io/hacs/action@sha256:a6bf0aaffca5d758c3007dee672480e6ac83b3a0d2a683fcbbeba3b08a5fac8a
 
   hassfest:
     runs-on: ubuntu-latest
