@@ -1,7 +1,14 @@
 import aiohttp
+import base64
+import hashlib
 import logging
 import json
 import asyncio
+import os
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.backends import default_backend
 
 from .const import (
     CONF_AVAILABILITY_TOPIC,
@@ -22,6 +29,35 @@ DEFAULT_TOPIC_PREFIX = "cala"
 PAIRING_TIMEOUT_S = 30
 # Bounded read so we don't hang if ESP32 sends response but doesn't close the connection
 PAIRING_SOCK_READ_S = 10
+
+
+def _encrypt_payload(payload: dict, pairing_code: str) -> str:
+    """
+    Encrypt payload with AES-128-CBC using pairing_code as key.
+    Key derived as SHA256(pairing_code)[:16]. IV (16 bytes) is prepended.
+    Output: base64(iv || ciphertext). Compatible with ESP32 mbedTLS.
+
+    ESP32 decryption (Arduino/mbedTLS):
+      Parse JSON body, get "encrypted" string.
+      base64_decode → raw bytes.
+      key = SHA256(pairing_code)[:16]
+      iv = raw[0:16], ciphertext = raw[16:]
+      AES_decrypt_CBC(key, iv, ciphertext)
+      PKCS7 unpad, then JSON parse.
+    """
+    key = hashlib.sha256(pairing_code.encode("utf-8")).digest()[:16]
+    iv = os.urandom(16)
+    plaintext = json.dumps(payload).encode("utf-8")
+
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(plaintext) + padder.finalize()
+
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(padded) + encryptor.finalize()
+
+    return base64.b64encode(iv + ciphertext).decode("ascii")
+
 
 async def _http_pair(
     url: str,
@@ -47,6 +83,8 @@ async def _http_pair(
             "password": password,
         },
     }
+    encrypted = _encrypt_payload(payload, pairing_code)
+    body = {"encrypted": encrypted}
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -55,7 +93,7 @@ async def _http_pair(
                 sock_connect=PAIRING_SOCK_READ_S,
                 sock_read=PAIRING_SOCK_READ_S,
             )
-            async with session.post(url, json=payload, timeout=timeout) as response:
+            async with session.post(url, json=body, timeout=timeout) as response:
                 body = await response.text()
                 resp = _safe_json_loads(body)
                 if response.status != 200 or not isinstance(resp, dict):
