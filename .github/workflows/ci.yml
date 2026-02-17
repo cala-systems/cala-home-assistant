@@ -29,6 +29,22 @@ jobs:
           sed -n '1,20p' /tmp/headers.txt || true
           echo "== body (first 300 chars) =="
           head -c 300 /tmp/body.json; echo
+      - name: Show decoded hacs.json from GitHub API (debug)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          curl -sS \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}" \
+            | python - <<'PY'
+          import json, base64, sys
+          data=json.load(sys.stdin)
+          raw=base64.b64decode(data["content"])
+          print("first_bytes_hex:", raw[:8].hex())
+          print(raw.decode("utf-8"))
+          PY
 
       - name: HACS validation
         uses: hacs/action@main
