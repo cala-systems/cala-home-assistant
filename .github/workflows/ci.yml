@@ -87,8 +87,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
+          echo "token_len=${#GITHUB_TOKEN}"
+          test "${#GITHUB_TOKEN}" -gt 0
           docker run --rm \
-            -e GITHUB_TOKEN \
+            -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
             -e GITHUB_ACTIONS=true \
             -e CI=true \
             -e REPOSITORY="${GITHUB_REPOSITORY}" \
