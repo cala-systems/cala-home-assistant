@@ -91,13 +91,17 @@ jobs:
 
           docker run --rm \
             -e GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
+            -e INPUT_GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
+            -e HACS_GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
             -e GITHUB_ACTIONS=true \
             -e CI=true \
             -e REPOSITORY="${GITHUB_REPOSITORY}" \
             -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e INPUT_REPOSITORY="${GITHUB_REPOSITORY}" \
             -e INPUT_CATEGORY=integration \
             -v "${GITHUB_WORKSPACE}":/github/workspace \
-            ghcr.io/hacs/action@sha256:a6bf0aaffca5d758c3007dee672480e6ac83b3a0d2a683fcbbeba3b08a5fac8a
+            ghcr.io/hacs/action@sha256:a6bf0aaffca5d758c3007dee672480e6ac83b3a0d2a683fcbbeba3b08a5fac8a \
+            -lc 'echo "len_github=${#GITHUB_TOKEN} len_input=${#INPUT_GITHUB_TOKEN} len_hacs=${#HACS_GITHUB_TOKEN}"'
 
   hassfest:
     runs-on: ubuntu-latest
