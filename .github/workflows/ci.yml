@@ -29,21 +29,57 @@ jobs:
           sed -n '1,20p' /tmp/headers.txt || true
           echo "== body (first 300 chars) =="
           head -c 300 /tmp/body.json; echo
-      - name: Show decoded hacs.json from GitHub API (debug)
+      - name: Dump hacs.json API response (debug)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          curl -sS \
+
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}"
+          echo "url=$url"
+
+          # Capture body and headers no matter what
+          curl -sS -L \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}" \
-            | python - <<'PY'
-          import json, base64, sys
-          data=json.load(sys.stdin)
-          raw=base64.b64decode(data["content"])
-          print("first_bytes_hex:", raw[:8].hex())
-          print(raw.decode("utf-8"))
+            -D /tmp/headers.txt \
+            -o /tmp/body.txt \
+            "$url" || true
+
+          echo "== status line =="
+          head -n 1 /tmp/headers.txt || true
+          echo "== first 40 header lines =="
+          sed -n '1,40p' /tmp/headers.txt || true
+
+          echo "== body size =="
+          wc -c /tmp/body.txt || true
+          echo "== body head =="
+          head -c 300 /tmp/body.txt; echo
+
+          # Now try to decode if JSON
+          python - <<'PY'
+          import json, base64, pathlib, sys
+          p = pathlib.Path("/tmp/body.txt")
+          raw = p.read_bytes()
+          if not raw.strip():
+              print("ERROR: empty body")
+              sys.exit(2)
+
+          try:
+              data = json.loads(raw.decode("utf-8"))
+          except Exception as e:
+              print("ERROR: body is not JSON:", e)
+              sys.exit(3)
+
+          content = data.get("content","")
+          if not content:
+              print("ERROR: JSON missing 'content' key")
+              sys.exit(4)
+
+          decoded = base64.b64decode(content)
+          print("first_bytes_hex:", decoded[:8].hex())
+          print("decoded_text:")
+          print(decoded.decode("utf-8"))
           PY
 
       - name: HACS validation
