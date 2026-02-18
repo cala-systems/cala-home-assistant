@@ -13,12 +13,95 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: HACS validation
-        uses: hacs/action@22.5.0
-        with:
-          category: integration
+      - name: API sanity check (can token read hacs.json?)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          echo "repo=$GITHUB_REPOSITORY ref=$GITHUB_REF_NAME"
+          curl -sS -D /tmp/headers.txt \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}" \
+            -o /tmp/body.json || true
+
+          echo "== status/headers =="
+          sed -n '1,20p' /tmp/headers.txt || true
+          echo "== body (first 300 chars) =="
+          head -c 300 /tmp/body.json; echo
+      - name: Dump hacs.json API response (debug)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/hacs.json?ref=${GITHUB_REF_NAME}"
+          echo "url=$url"
+
+          # Capture body and headers no matter what
+          curl -sS -L \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -D /tmp/headers.txt \
+            -o /tmp/body.txt \
+            "$url" || true
+
+          echo "== status line =="
+          head -n 1 /tmp/headers.txt || true
+          echo "== first 40 header lines =="
+          sed -n '1,40p' /tmp/headers.txt || true
+
+          echo "== body size =="
+          wc -c /tmp/body.txt || true
+          echo "== body head =="
+          head -c 300 /tmp/body.txt; echo
+
+          # Now try to decode if JSON
+          python - <<'PY'
+          import json, base64, pathlib, sys
+          p = pathlib.Path("/tmp/body.txt")
+          raw = p.read_bytes()
+          if not raw.strip():
+              print("ERROR: empty body")
+              sys.exit(2)
+
+          try:
+              data = json.loads(raw.decode("utf-8"))
+          except Exception as e:
+              print("ERROR: body is not JSON:", e)
+              sys.exit(3)
+
+          content = data.get("content","")
+          if not content:
+              print("ERROR: JSON missing 'content' key")
+              sys.exit(4)
+
+          decoded = base64.b64decode(content)
+          print("first_bytes_hex:", decoded[:8].hex())
+          print("decoded_text:")
+          print(decoded.decode("utf-8"))
+          PY
+
+      - name: HACS validation (pinned container digest)
+        env:
+          HACS_GITHUB_TOKEN: ${{ secrets.HACS_GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          test "${#HACS_GITHUB_TOKEN}" -gt 0
+
+          docker run --rm \
+            -e GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
+            -e INPUT_GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
+            -e HACS_GITHUB_TOKEN="${HACS_GITHUB_TOKEN}" \
+            -e GITHUB_ACTIONS=true \
+            -e CI=true \
+            -e REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e INPUT_REPOSITORY="${GITHUB_REPOSITORY}" \
+            -e INPUT_CATEGORY=integration \
+            -v "${GITHUB_WORKSPACE}":/github/workspace \
+            ghcr.io/hacs/action@sha256:a6bf0aaffca5d758c3007dee672480e6ac83b3a0d2a683fcbbeba3b08a5fac8a \
+            -lc 'echo "len_github=${#GITHUB_TOKEN} len_input=${#INPUT_GITHUB_TOKEN} len_hacs=${#HACS_GITHUB_TOKEN}"'
 
   hassfest:
     runs-on: ubuntu-latest
