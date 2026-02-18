@@ -8,7 +8,7 @@ from homeassistant.components import mqtt
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import (
     UnitOfTemperature,
     UnitOfEnergy,
@@ -16,9 +16,11 @@ from homeassistant.const import (
     UnitOfVolume
 )
 
-from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL
+from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL, ConnectionStatus
 
 _LOGGER = logging.getLogger(__name__)
+
+CONNECTION_TIMEOUT_S = 300  # 5 minutes without data → offline
 
 TELEMETRY_FIELDS = {
     "top_c": {
@@ -133,6 +135,24 @@ class CalaBase:
         }
 
 
+class CalaConnectionStatus(CalaBase, SensorEntity):
+    """Sensor reporting device connection state: Pending → Connected → Offline."""
+
+    def __init__(
+        self, device_id: str, device_name: str, initial_state: ConnectionStatus = ConnectionStatus.OFFLINE
+    ):
+        super().__init__(device_id, device_name)
+        self._attr_name = f"{device_name} Connection"
+        self._attr_unique_id = f"cala_{device_id}_connection"
+        self._attr_native_value = initial_state
+        self._attr_device_class = SensorDeviceClass.ENUM
+        self._attr_options = [ConnectionStatus.PENDING, ConnectionStatus.CONNECTED, ConnectionStatus.OFFLINE]
+
+    def set_state(self, state: ConnectionStatus) -> None:
+        """Set connection state."""
+        self._attr_native_value = state
+
+
 class CalaTelemetrySensor(CalaBase, SensorEntity):
     def __init__(self, device_id: str, device_name: str, key: str, meta: dict[str, Any]):
         super().__init__(device_id, device_name)
@@ -164,9 +184,20 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     _LOGGER.debug("CALA MQTT: sensor.py: async_setup_entry called")
     device_id = entry.data["device_id"]
-    device_name = entry.data["device_name"] or f"Cala Water Heater"
+    device_name = entry.data["device_name"] or "Cala Water Heater"
     state_topic = entry.data["state_topic"]
 
+    # Pending = just paired (HTTP sent), Offline = restart/reload
+    initial_state = (
+        ConnectionStatus.PENDING
+        if entry.data.get("_connection_initial_state") == ConnectionStatus.PENDING
+        else ConnectionStatus.OFFLINE
+    )
+    if initial_state == ConnectionStatus.PENDING:
+        data = {k: v for k, v in entry.data.items() if k != "_connection_initial_state"}
+        hass.config_entries.async_update_entry(entry, data=data)
+
+    connection_status = CalaConnectionStatus(device_id, device_name, initial_state)
     sensors: list[SensorEntity] = [
         CalaTelemetrySensor(device_id, device_name, key, meta)
         for key, meta in TELEMETRY_FIELDS.items()
@@ -175,10 +206,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CalaBinarySensor(device_id, device_name, key, name)
         for key, name in BINARY_FIELDS.items()
     ]
+    all_data_entities = sensors + binaries
 
-    async_add_entities(sensors + binaries)
+    async_add_entities([connection_status] + sensors + binaries)
 
-    async def message_received(msg):
+    timeout_timer_handle = None
+
+    @callback
+    def _on_timeout() -> None:
+        nonlocal timeout_timer_handle
+        timeout_timer_handle = None
+        connection_status.set_state(ConnectionStatus.OFFLINE)
+        connection_status.async_write_ha_state()
+        for e in all_data_entities:
+            e._attr_available = False
+            e.async_write_ha_state()
+        _LOGGER.info("Cala device %s: no data for %ds, set offline", device_id, CONNECTION_TIMEOUT_S)
+
+    def message_received(msg):
+        nonlocal timeout_timer_handle
         raw = _payload_to_str(msg.payload)
 
         try:
@@ -193,20 +239,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         _LOGGER.debug("Received payload on %s: %s", state_topic, payload)
 
-        for s in sensors:
-            try:
-                s.update_from_payload(payload)
-                s.async_write_ha_state()
-            except Exception as e:
-                _LOGGER.warning("Error updating sensor %s: %s", s._key, e)
+        def _process_on_event_loop() -> None:
+            nonlocal timeout_timer_handle
+            if connection_status._attr_native_value in (ConnectionStatus.PENDING, ConnectionStatus.OFFLINE):
+                was_offline = connection_status._attr_native_value == ConnectionStatus.OFFLINE
+                connection_status.set_state(ConnectionStatus.CONNECTED)
+                connection_status.async_write_ha_state()
+                if was_offline:
+                    for e in all_data_entities:
+                        e._attr_available = True
 
-        for b in binaries:
-            try:
-                b.update_from_payload(payload)
-                b.async_write_ha_state()
-            except Exception as e:
-                _LOGGER.warning("Error updating binary sensor %s: %s", b._key, e)
+            if timeout_timer_handle is not None:
+                timeout_timer_handle.cancel()
+            timeout_timer_handle = hass.loop.call_later(CONNECTION_TIMEOUT_S, _on_timeout)
+
+            for s in sensors:
+                try:
+                    s.update_from_payload(payload)
+                    s.async_write_ha_state()
+                except Exception as e:
+                    _LOGGER.warning("Error updating sensor %s: %s", s._key, e)
+
+            for b in binaries:
+                try:
+                    b.update_from_payload(payload)
+                    b.async_write_ha_state()
+                except Exception as e:
+                    _LOGGER.warning("Error updating binary sensor %s: %s", b._key, e)
+
+        hass.loop.call_soon_threadsafe(_process_on_event_loop)
 
     unsubscribe = await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
     hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribe"] = unsubscribe
+    hass.data[DOMAIN][entry.entry_id]["timeout_timer"] = lambda: (
+        timeout_timer_handle.cancel() if timeout_timer_handle is not None else None
+    )

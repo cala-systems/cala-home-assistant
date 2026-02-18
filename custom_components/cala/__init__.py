@@ -82,9 +82,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _state_changed,
     )
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "state_unsub": unsub,
-    }
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = (
+        hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
+    )
+    hass.data[DOMAIN][entry.entry_id]["state_unsub"] = unsub
 
     return True
 
@@ -99,6 +100,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     mqtt_unsub = entry_data.get("mqtt_unsubscribe")
     if callable(mqtt_unsub):
         mqtt_unsub()
+    # Cancel connection timeout timer
+    cancel_timeout = entry_data.get("timeout_timer")
+    if callable(cancel_timeout):
+        cancel_timeout()
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

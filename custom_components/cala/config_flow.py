@@ -13,7 +13,8 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_ID,
     CONF_DEVICE_HOST,
-    CONF_DEVICE_PORT,    
+    CONF_DEVICE_PORT,
+    ConnectionStatus,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -174,9 +175,12 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(actual_id)
                 self._abort_if_unique_id_configured()
 
+            # Mark as Pending so sensor starts in Pending (HTTP sent, awaiting first MQTT)
+            entry_data = {**data, "_connection_initial_state": ConnectionStatus.PENDING}
+
             return self.async_create_entry(
                 title=f"Cala Device ({data.get(CONF_DEVICE_NAME, device_id)})",
-                data=data,
+                data=entry_data,
             )
 
         return self.async_show_form(

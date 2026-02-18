@@ -1,3 +1,12 @@
+from enum import StrEnum
+
+
+class ConnectionStatus(StrEnum):
+    PENDING = "Pending"
+    CONNECTED = "Connected"
+    OFFLINE = "Offline"
+
+
 DOMAIN = "cala"
 
 CONF_DEVICE_ID = "device_id"
