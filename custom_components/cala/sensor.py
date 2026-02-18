@@ -13,10 +13,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.const import (
+    EntityCategory,
     UnitOfTemperature,
     UnitOfEnergy,
     UnitOfTime,
-    UnitOfVolume
+    UnitOfVolume,
 )
 
 from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL, ConnectionStatus
@@ -76,26 +77,31 @@ TELEMETRY_FIELDS = {
         "name": "Uptime",
         "unit": UnitOfTime.SECONDS,
         "device_class": SensorDeviceClass.DURATION,
+        "entity_category": EntityCategory.DIAGNOSTIC,
     },
     "wifi_ip": {
         "name": "WiFi IP",
         "unit": None,
         "device_class": None,
+        "entity_category": EntityCategory.DIAGNOSTIC,
     },
     "wifi_ssid": {
         "name": "WiFi SSID",
         "unit": None,
         "device_class": None,
+        "entity_category": EntityCategory.DIAGNOSTIC,
     },
     "wifi_rssi_dbm": {
         "name": "WiFi Signal",
         "unit": "dBm",
         "device_class": SensorDeviceClass.SIGNAL_STRENGTH,
+        "entity_category": EntityCategory.DIAGNOSTIC,
     },
     "fw_version": {
         "name": "Firmware Version",
         "unit": None,
         "device_class": None,
+        "entity_category": EntityCategory.DIAGNOSTIC,
     },
 }
 
@@ -167,6 +173,8 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
         self._attr_unique_id = f"cala_{device_id}_{key}"
         self._attr_native_unit_of_measurement = meta.get("unit")
         self._attr_device_class = meta.get("device_class")
+        if meta.get("entity_category") is not None:
+            self._attr_entity_category = meta["entity_category"]
         self._attr_native_value = None
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
