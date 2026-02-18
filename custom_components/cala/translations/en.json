@@ -10,7 +10,9 @@
       "cannot_connect": "Failed to connect. Please try again.",
       "provisioning_failed": "Provisioning failed. Please try again.",
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
-      "invalid_host": "A valid device host is required."
+      "invalid_host": "A valid device host or IP address is required.",
+      "invalid_provisioning_code": "Provisioning code is required.",
+      "invalid_mqtt_username": "MQTT username is required."
     },
     "step": {
       "user": {
@@ -50,6 +52,51 @@
             }
           }
         }
+      },
+      "init": {
+        "menu_options": {
+          "entities": "Entity mappings (solar, battery)",
+          "reprovision": "Re-provision device (pairing code, broker, credentials)"
+        }
+      },
+      "reprovision": {
+        "title": "Re-provision device",
+        "description": "Update the pairing code, MQTT broker, or credentials. Enter the device IP if needed (find it in your router or device display).",
+        "data": {
+          "device_host": "Device host or IP",
+          "device_port": "Device port",
+          "provisioning_code": "Provisioning code",
+          "mqtt_username": "MQTT username",
+          "mqtt_password": "MQTT password"
+        }
+      },
+      "entities": {
+        "title": "Entity mappings"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Cala",
+        "description": "Choose what to configure.",
+        "data": {
+          "next_step": "What would you like to do?"
+        }
+      },
+      "reprovision": {
+        "title": "Re-provision device",
+        "description": "Update the pairing code, MQTT broker, or credentials. Enter the device IP if needed (find it in your router or device display).",
+        "data": {
+          "device_host": "Device host or IP",
+          "device_port": "Device port",
+          "provisioning_code": "Provisioning code",
+          "mqtt_username": "MQTT username",
+          "mqtt_password": "MQTT password"
+        }
+      },
+      "entities": {
+        "title": "Entity mappings"
       }
     }
   }
