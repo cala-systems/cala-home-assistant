@@ -95,9 +95,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if callable(state_unsub):
         state_unsub()
     # Unsubscribe from MQTT (sensor subscription)
-    mqtt_unsub = entry_data.get("mqtt_unsubscribe")
-    if callable(mqtt_unsub):
-        mqtt_unsub()
+    mqtt_unsubs = entry_data.get("mqtt_unsubscribes") or []
+    if callable(entry_data.get("mqtt_unsubscribe")):
+        mqtt_unsubs.append(entry_data["mqtt_unsubscribe"])
+
+    for unsub in mqtt_unsubs:
+        if callable(unsub):
+            unsub()
     # Cancel connection timeout timer
     cancel_timeout = entry_data.get("timeout_timer")
     if callable(cancel_timeout):

@@ -3,3 +3,4 @@ __pycache__
 custom_components/cala_mqtt/__pycache__
 custom_components/cala/__pycache__
 scripts
+.venv
