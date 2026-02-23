@@ -6,21 +6,25 @@ from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components import mqtt
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_change
-from homeassistant.helpers.storage import Store
 from homeassistant.const import (
     EntityCategory,
-    UnitOfTemperature,
     UnitOfEnergy,
+    UnitOfTemperature,
     UnitOfTime,
     UnitOfVolume,
 )
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, DEVICE_MANUFACTURER, DEVICE_MODEL, ConnectionStatus
+from .const import CONNECTION_STATUS, DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, ConnectionStatus
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,9 +122,7 @@ BINARY_FIELDS = {
 
 
 def _payload_to_str(payload: Any) -> str:
-    """
-    Normalizing MQTT payload into a JSON string.
-    """
+    """Normalize MQTT payload into a string."""
     if payload is None:
         return ""
 
@@ -132,16 +134,76 @@ def _payload_to_str(payload: Any) -> str:
 
     if isinstance(payload, str):
         return payload
-
-    # Last resort: stringify whatever it is
     return str(payload)
 
 
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        # allow strings like "12.0"
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "t", "yes", "y", "on", "1"):
+            return True
+        if v in ("false", "f", "no", "n", "off", "0"):
+            return False
+    return None
+
+
+def _coerce_telemetry_value(key: str, value: Any) -> Any:
+    """Return a safe scalar for HA state, or None to ignore."""
+    if key in ("wifi_ip", "wifi_ssid", "fw_version"):
+        return _coerce_str(value)
+    if key in ("uptime_sec",):
+        return _coerce_int(value)
+    if key in ("wifi_rssi_dbm",):
+        return _coerce_int(value)
+    # everything else in TELEMETRY_FIELDS is numeric
+    return _coerce_float(value)
+
+
 class CalaBase:
-    def __init__(self, device_id: str, device_name: str):
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, device_id)},
-            "name": device_name,
+    def __init__(self, device_id: str, device_name: str) -> None:
+        self._device_id = device_id
+        self._device_name = device_name
+        self._attr_available = True
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "name": self._device_name,
             "manufacturer": DEVICE_MANUFACTURER,
             "model": DEVICE_MODEL,
         }
@@ -151,121 +213,116 @@ class CalaConnectionStatus(CalaBase, SensorEntity):
     """Sensor reporting device connection state: Pending → Connected → Offline."""
 
     def __init__(
-        self, device_id: str, device_name: str, initial_state: ConnectionStatus = ConnectionStatus.OFFLINE
-    ):
+        self,
+        device_id: str,
+        device_name: str,
+        initial: ConnectionStatus,
+    ) -> None:
         super().__init__(device_id, device_name)
         self._attr_name = f"{device_name} Connection"
         self._attr_unique_id = f"cala_{device_id}_connection"
-        self._attr_native_value = initial_state
-        self._attr_device_class = SensorDeviceClass.ENUM
-        self._attr_options = [ConnectionStatus.PENDING, ConnectionStatus.CONNECTED, ConnectionStatus.OFFLINE]
+        self._attr_native_value = initial.value
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def set_state(self, state: ConnectionStatus) -> None:
-        """Set connection state."""
-        self._attr_native_value = state
+        self._attr_native_value = state.value
 
 
 class CalaTelemetrySensor(CalaBase, SensorEntity):
-    def __init__(self, device_id: str, device_name: str, key: str, meta: dict[str, Any]):
+    def __init__(self, device_id: str, device_name: str, key: str, meta: dict[str, Any]) -> None:
         super().__init__(device_id, device_name)
         self._key = key
         self._attr_name = f"{device_name} {meta['name']}"
         self._attr_unique_id = f"cala_{device_id}_{key}"
         self._attr_native_unit_of_measurement = meta.get("unit")
         self._attr_device_class = meta.get("device_class")
-        if meta.get("entity_category") is not None:
-            self._attr_entity_category = meta["entity_category"]
+        self._attr_entity_category = meta.get("entity_category")
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_value = None
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
-        if self._key in payload:
-            self._attr_native_value = payload[self._key]
+        raw = payload.get(self._key)
+        coerced = _coerce_telemetry_value(self._key, raw)
+        # If coercion fails, ignore this update
+        if coerced is None:
+            return
+        self._attr_native_value = coerced
 
 
 class CalaBinarySensor(CalaBase, BinarySensorEntity):
-    def __init__(self, device_id: str, device_name: str, key: str, name: str):
+    def __init__(self, device_id: str, device_name: str, key: str, name: str) -> None:
         super().__init__(device_id, device_name)
         self._key = key
         self._attr_name = f"{device_name} {name}"
         self._attr_unique_id = f"cala_{device_id}_{key}"
-        self._attr_is_on = False
+        self._attr_is_on = None
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
-        if self._key in payload:
-            self._attr_is_on = bool(payload[self._key])
+        raw = payload.get(self._key)
+        coerced = _coerce_bool(raw)
+        if coerced is None:
+            return
+        self._attr_is_on = coerced
 
 
 class CalaTotalizer:
-    """Accumulates energy/water deltas during the day; rolls over at midnight."""
-
-    def __init__(self, hass: HomeAssistant, device_id: str):
+    def __init__(self, hass: HomeAssistant, device_id: str) -> None:
         self._hass = hass
         self._device_id = device_id
-        self._store = Store[dict](hass, STORAGE_VERSION, f"{STORAGE_KEY}_{device_id}")
-        self._today_energy = 0.0
-        self._today_gallons = 0.0
+        self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{device_id}")
         self._last_energy: float | None = None
         self._last_gallons: float | None = None
+        self._today_energy: float = 0.0
+        self._today_gallons: float = 0.0
         self._last_date: str | None = None
 
     async def _load(self) -> None:
-        data = await self._store.async_load()
-        if data:
-            self._today_energy = float(data.get("today_energy", 0))
-            self._today_gallons = float(data.get("today_gallons", 0))
-            self._last_energy = data.get("last_energy")
-            self._last_gallons = data.get("last_gallons")
-            self._last_date = data.get("last_date")
-            if self._last_energy is not None:
-                self._last_energy = float(self._last_energy)
-            if self._last_gallons is not None:
-                self._last_gallons = float(self._last_gallons)
+        data = await self._store.async_load() or {}
+        self._last_energy = _coerce_float(data.get("last_energy"))
+        self._last_gallons = _coerce_float(data.get("last_gallons"))
+        self._today_energy = float(data.get("today_energy") or 0.0)
+        self._today_gallons = float(data.get("today_gallons") or 0.0)
+        self._last_date = data.get("last_date") or date.today().isoformat()
 
-    def _persist(self) -> None:
-        self._store.async_delay_save(
-            lambda: {
-                "today_energy": self._today_energy,
-                "today_gallons": self._today_gallons,
+    async def _save(self) -> None:
+        await self._store.async_save(
+            {
                 "last_energy": self._last_energy,
                 "last_gallons": self._last_gallons,
+                "today_energy": self._today_energy,
+                "today_gallons": self._today_gallons,
                 "last_date": self._last_date,
-            },
-            delay=1.0,
+            }
         )
 
-    def update(self, energy_kwh: float | None, gallons: float | None) -> None:
-        """Process new values from device (cumulative). Adds delta to today's total."""
-        today_str = date.today().isoformat()
-        if self._last_date != today_str:
+    def _rollover_if_needed(self) -> None:
+        today = date.today().isoformat()
+        if self._last_date != today:
             self._today_energy = 0.0
             self._today_gallons = 0.0
-            self._last_date = today_str
+            self._last_date = today
 
-        if energy_kwh is not None:
-            if self._last_energy is not None:
-                delta = energy_kwh - self._last_energy
-                if delta < 0:
-                    delta = energy_kwh
-                self._today_energy += delta
-            self._last_energy = energy_kwh
+    def update(self, energy_total: float | None, gallons_total: float | None) -> None:
+        self._rollover_if_needed()
 
-        if gallons is not None:
-            if self._last_gallons is not None:
-                delta = gallons - self._last_gallons
-                if delta < 0:
-                    delta = gallons
-                self._today_gallons += delta
-            self._last_gallons = gallons
+        if energy_total is not None:
+            if self._last_energy is not None and energy_total >= self._last_energy:
+                self._today_energy += energy_total - self._last_energy
+            self._last_energy = energy_total
 
-        self._persist()
+        if gallons_total is not None:
+            if self._last_gallons is not None and gallons_total >= self._last_gallons:
+                self._today_gallons += gallons_total - self._last_gallons
+            self._last_gallons = gallons_total
+
+        self._hass.async_create_task(self._save())
 
     @callback
-    def _on_midnight(self) -> None:
-        """Rollover at midnight: reset today's accumulator."""
+    def _on_midnight(self, now: datetime) -> None:
         self._today_energy = 0.0
         self._today_gallons = 0.0
         self._last_date = date.today().isoformat()
-        self._persist()
+        self._hass.async_create_task(self._save())
 
     def energy_today(self) -> float | None:
         return self._today_energy if self._last_energy is not None else None
@@ -285,9 +342,7 @@ class CalaTotalizer:
         return self._last_gallons
 
     def register_midnight_listener(self) -> None:
-        async_track_time_change(
-            self._hass, self._on_midnight, hour=0, minute=0, second=0
-        )
+        async_track_time_change(self._hass, self._on_midnight, hour=0, minute=0, second=0)
 
 
 class CalaEnergyTodaySensor(CalaBase, SensorEntity):
@@ -300,6 +355,7 @@ class CalaEnergyTodaySensor(CalaBase, SensorEntity):
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_value = None
+        self._attr_last_reset = None
 
     def update_value(self) -> None:
         self._attr_native_value = self._totalizer.energy_today()
@@ -328,9 +384,9 @@ class CalaWaterTodaySensor(CalaBase, SensorEntity):
         self._attr_name = f"{device_name} Water Today"
         self._attr_unique_id = f"cala_{device_id}_water_today"
         self._attr_native_unit_of_measurement = UnitOfVolume.GALLONS
-        self._attr_device_class = None
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_value = None
+        self._attr_last_reset = None
 
     def update_value(self) -> None:
         self._attr_native_value = self._totalizer.water_today()
@@ -344,7 +400,6 @@ class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
         self._attr_name = f"{device_name} Water Total"
         self._attr_unique_id = f"cala_{device_id}_water_cumulative"
         self._attr_native_unit_of_measurement = UnitOfVolume.GALLONS
-        self._attr_device_class = None
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_value = None
 
@@ -355,10 +410,11 @@ class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     _LOGGER.debug("CALA MQTT: sensor.py: async_setup_entry called")
     device_id = entry.data["device_id"]
-    device_name = entry.data["device_name"] or "Cala Water Heater"
+    device_name = entry.data.get("device_name") or "Cala Water Heater"
     state_topic = entry.data["state_topic"]
 
-    # Pending = just paired (HTTP sent), Offline = restart/reload
+    availability_topic = entry.data.get("availability_topic") or f"cala/{device_id}/availability"
+
     initial_state = (
         ConnectionStatus.PENDING
         if entry.data.get("_connection_initial_state") == ConnectionStatus.PENDING
@@ -389,8 +445,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     all_data_entities = sensors + binaries + totalizer_sensors
 
     async_add_entities([connection_status] + sensors + binaries + totalizer_sensors)
+    _set_entities_available(connection_status._attr_native_value == ConnectionStatus.CONNECTED.value)
 
     timeout_timer_handle = None
+
+    def _set_entities_available(available: bool) -> None:
+        for e in all_data_entities:
+            e._attr_available = available
+            e.async_write_ha_state()
 
     @callback
     def _on_timeout() -> None:
@@ -398,82 +460,123 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         timeout_timer_handle = None
         connection_status.set_state(ConnectionStatus.OFFLINE)
         connection_status.async_write_ha_state()
-        for e in all_data_entities:
-            e._attr_available = False
-            e.async_write_ha_state()
-        _LOGGER.info("Cala device %s: no data for %ds, set offline", device_id, CONNECTION_TIMEOUT_S)
+        _set_entities_available(False)
+        _LOGGER.info(
+            "Cala device %s: no valid telemetry for %ds, set offline",
+            device_id,
+            CONNECTION_TIMEOUT_S,
+        )
 
-    def message_received(msg):
+    def _refresh_timeout() -> None:
         nonlocal timeout_timer_handle
-        raw = _payload_to_str(msg.payload)
+        if timeout_timer_handle is not None:
+            timeout_timer_handle.cancel()
+        timeout_timer_handle = hass.loop.call_later(CONNECTION_TIMEOUT_S, _on_timeout)
 
+    def _mark_connected_if_needed() -> None:
+        # Called only after we processed a valid dict payload
+        if connection_status._attr_native_value in (
+            ConnectionStatus.PENDING.value,
+            ConnectionStatus.OFFLINE.value,
+        ):
+            was_offline = connection_status._attr_native_value == ConnectionStatus.OFFLINE.value
+            connection_status.set_state(ConnectionStatus.CONNECTED)
+            connection_status.async_write_ha_state()
+            if was_offline:
+                _set_entities_available(True)
+
+    def availability_received(msg) -> None:
+        """
+        Availability is authoritative for online/offline. It must never raise.
+        Accepted: 'online' / 'offline' (case-insensitive), anything else is ignored.
+        """
         try:
-            payload = json.loads(raw)
-        except Exception as e:
-            _LOGGER.warning("Invalid JSON on %s: %s (%s)", state_topic, raw, e)
-            return
+            raw = _payload_to_str(msg.payload).strip().lower()
+            if raw not in ("online", "offline"):
+                _LOGGER.debug("Ignoring availability payload on %s: %r", availability_topic, raw)
+                return
 
-        if not isinstance(payload, dict):
-            _LOGGER.warning("Unexpected payload type on %s: %s", state_topic, type(payload))
-            return
-
-        _LOGGER.debug("Received payload on %s: %s", state_topic, payload)
-
-        async def _process_payload() -> None:
-            nonlocal timeout_timer_handle
-            energy = payload.get("energy_used_kwh")
-            gallons = payload.get("gallons_used")
-            try:
-                energy = float(energy) if energy is not None else None
-            except (TypeError, ValueError):
-                energy = None
-            try:
-                gallons = float(gallons) if gallons is not None else None
-            except (TypeError, ValueError):
-                gallons = None
-            totalizer.update(energy, gallons)
-
-            if connection_status._attr_native_value in (ConnectionStatus.PENDING, ConnectionStatus.OFFLINE):
-                was_offline = connection_status._attr_native_value == ConnectionStatus.OFFLINE
-                connection_status.set_state(ConnectionStatus.CONNECTED)
+            if raw == "offline":
+                nonlocal timeout_timer_handle
+                if timeout_timer_handle is not None:
+                    timeout_timer_handle.cancel()
+                    timeout_timer_handle = None
+                if connection_status._attr_native_value != ConnectionStatus.OFFLINE:
+                    _LOGGER.info("Cala device %s availability=offline", device_id)
+                connection_status.set_state(ConnectionStatus.OFFLINE)
                 connection_status.async_write_ha_state()
-                if was_offline:
-                    for e in all_data_entities:
-                        e._attr_available = True
+                _set_entities_available(False)
+                return
 
-            if timeout_timer_handle is not None:
-                timeout_timer_handle.cancel()
-            timeout_timer_handle = hass.loop.call_later(CONNECTION_TIMEOUT_S, _on_timeout)
+            # online
+            if connection_status._attr_native_value == ConnectionStatus.OFFLINE.value:
+                # Online but waiting for valid state telemetry
+                _LOGGER.info("Cala device %s availability=online", device_id)
+                connection_status.set_state(ConnectionStatus.PENDING)
+                connection_status.async_write_ha_state()
+                _set_entities_available(False)
+        except Exception:
+            _LOGGER.exception("Unhandled error in availability_received for %s", device_id)
 
-            for s in sensors:
-                try:
-                    s.update_from_payload(payload)
-                    s.async_write_ha_state()
-                except Exception as e:
-                    _LOGGER.warning("Error updating sensor %s: %s", s._key, e)
+    def message_received(msg) -> None:
+        """
+        State telemetry handler.
+        Rules:
+          - Must never raise.
+          - Must ignore broken JSON / non-dict payloads.
+          - Must only refresh timeout after a valid dict payload was processed.
+        """
+        try:
+            raw = _payload_to_str(msg.payload)
 
-            for b in binaries:
-                try:
-                    b.update_from_payload(payload)
-                    b.async_write_ha_state()
-                except Exception as e:
-                    _LOGGER.warning("Error updating binary sensor %s: %s", b._key, e)
+            try:
+                payload = json.loads(raw)
+            except Exception as e:
+                _LOGGER.warning("Invalid JSON on %s: %s (%s)", state_topic, raw, e)
+                return
 
-            for t in totalizer_sensors:
-                try:
-                    t.update_value()
-                    t.async_write_ha_state()
-                except Exception as e:
-                    _LOGGER.warning("Error updating totalizer sensor %s: %s", t._attr_name, e)
+            if not isinstance(payload, dict):
+                _LOGGER.warning("Unexpected payload type on %s: %s", state_topic, type(payload))
+                return
 
-        def _schedule() -> None:
+            async def _process_payload() -> None:
+                energy = _coerce_float(payload.get("energy_used_kwh"))
+                gallons = _coerce_float(payload.get("gallons_used"))
+                totalizer.update(energy, gallons)
+
+                _mark_connected_if_needed()
+                _refresh_timeout()
+
+                # Update entities with coercion/ignore semantics.
+                for s in sensors:
+                    try:
+                        s.update_from_payload(payload)
+                        s.async_write_ha_state()
+                    except Exception:
+                        _LOGGER.exception("Error updating sensor %s", getattr(s, "_key", "?"))
+
+                for b in binaries:
+                    try:
+                        b.update_from_payload(payload)
+                        b.async_write_ha_state()
+                    except Exception:
+                        _LOGGER.exception("Error updating binary sensor %s", getattr(b, "_key", "?"))
+
+                for t in totalizer_sensors:
+                    try:
+                        t.update_value()
+                        t.async_write_ha_state()
+                    except Exception:
+                        _LOGGER.exception("Error updating totalizer sensor %s", getattr(t, "_attr_name", "?"))
+
             hass.async_create_task(_process_payload())
+        except Exception:
+            _LOGGER.exception("Unhandled error in message_received for %s", device_id)
 
-        hass.loop.call_soon_threadsafe(_schedule)
-
-    unsubscribe = await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
+    unsub_state = await mqtt.async_subscribe(hass, state_topic, message_received, qos=0)
+    unsub_avail = await mqtt.async_subscribe(hass, availability_topic, availability_received, qos=0)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
-    hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribe"] = unsubscribe
+    hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribes"] = [unsub_state, unsub_avail]
     hass.data[DOMAIN][entry.entry_id]["timeout_timer"] = lambda: (
         timeout_timer_handle.cancel() if timeout_timer_handle is not None else None
     )
