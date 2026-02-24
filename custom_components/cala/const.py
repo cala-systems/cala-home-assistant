@@ -23,6 +23,7 @@ CONF_BROKER_PORT = "broker_port"
 
 DEFAULT_STATE_TOPIC_TPL = "cala/{device_id}/state"
 DEFAULT_COMMAND_TOPIC_TPL = "cala/{device_id}/command"
+DEFAULT_RESPONSE_TOPIC_SUFFIX = "/response"  # cala/{device_id}/command/response
 
 DEVICE_MANUFACTURER = "Cala Systems"
 DEVICE_MODEL = "Cala Water Heater"

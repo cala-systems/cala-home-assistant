@@ -1,0 +1,36 @@
+start_boost:
+  name: Start Boost
+  description: Start boost mode on a Cala device.
+  fields:
+    device_id:
+      name: Device ID
+      description: Cala device ID (e.g. 2507xxa006).
+      required: true
+      example: "2507xxa006"
+      selector:
+        text:
+
+    duration:
+      name: Duration (hours)
+      description: Boost duration in hours. Defaults to 24.
+      required: false
+      example: 24
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          step: 1
+          unit_of_measurement: h
+
+stop_boost:
+  name: Stop Boost
+  description: Stop boost mode on a Cala device.
+  fields:
+    device_id:
+      name: Device ID
+      description: Cala device ID (e.g. 2507xxa006).
+      required: true
+      example: "2507xxa006"
+      selector:
+        text:

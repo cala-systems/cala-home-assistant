@@ -26,7 +26,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 
-from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, ConnectionStatus
+from .const import (
+    CONF_COMMAND_TOPIC,
+    DEVICE_MANUFACTURER,
+    DEVICE_MODEL,
+    DOMAIN,
+    ConnectionStatus,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -501,6 +507,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     device_id = entry.data["device_id"]
     device_name = entry.data.get("device_name") or "Cala Water Heater"
     state_topic = entry.data["state_topic"]
+    command_topic = entry.data.get(CONF_COMMAND_TOPIC) or f"cala/{device_id}/command"
+    response_topic = f"{command_topic.rstrip('/')}/response"
 
     initial_state = (
         ConnectionStatus.PENDING
@@ -590,6 +598,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 return
 
             async def _process_payload() -> None:
+                if "boost_mode_on" in payload:
+                    _LOGGER.info(
+                        "Cala sensor: device_id=%s telemetry boost_mode_on=%s",
+                        device_id,
+                        payload.get("boost_mode_on"),
+                    )
                 energy = _coerce_float(payload.get("energy_used_kwh"))
                 gallons = _coerce_float(payload.get("gallons_used"))
                 totalizer.update(energy, gallons)
@@ -625,9 +639,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         except Exception:
             _LOGGER.exception("Unhandled error in message_received for %s", device_id)
 
+    @callback
+    def _on_command_response(msg) -> None:
+        """Handle device responses to commands (accepted/rejected)."""
+        try:
+            raw = _payload_to_str(msg.payload)
+            try:
+                payload = json.loads(raw)
+            except Exception as e:
+                _LOGGER.warning("Invalid JSON on %s: %s (%s)", response_topic, raw, e)
+                return
+            if not isinstance(payload, dict):
+                return
+            status = payload.get("status")
+            if status == "accepted":
+                _LOGGER.info(
+                    "Cala device %s: command accepted, id=%s",
+                    device_id,
+                    payload.get("id"),
+                )
+            elif status == "rejected":
+                _LOGGER.warning(
+                    "Cala device %s: command rejected, reason=%s",
+                    device_id,
+                    payload.get("reason", "unknown"),
+                )
+            else:
+                _LOGGER.debug("Cala device %s: command response: %s", device_id, payload)
+        except Exception:
+            _LOGGER.exception("Unhandled error in _on_command_response for %s", device_id)
+
     unsub_state = await mqtt.async_subscribe(hass, state_topic, message_received, qos=1)
+    unsub_response = await mqtt.async_subscribe(
+        hass, response_topic, _on_command_response, qos=1
+    )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
-    hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribes"] = [unsub_state]
+    hass.data[DOMAIN][entry.entry_id]["mqtt_unsubscribes"] = [unsub_state, unsub_response]
     hass.data[DOMAIN][entry.entry_id]["timeout_timer"] = lambda: (
         timeout_timer_handle.cancel() if timeout_timer_handle is not None else None
     )
