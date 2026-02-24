@@ -108,15 +108,7 @@ class BoostButton(ButtonEntity):
         if not self._boost_entity_id:
             return False
         state = self._hass.states.get(self._boost_entity_id)
-        is_on = state is not None and state.state == "on"
-        _LOGGER.debug(
-            "Cala button: _boost_is_on device_id=%s entity=%s state=%s -> %s",
-            self._device_id,
-            self._boost_entity_id,
-            state.state if state else "None",
-            is_on,
-        )
-        return is_on
+        return state is not None and state.state == "on"
 
     @property
     def name(self) -> str:

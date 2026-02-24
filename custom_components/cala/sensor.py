@@ -599,7 +599,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
             async def _process_payload() -> None:
                 if "boost_mode_on" in payload:
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "Cala sensor: device_id=%s telemetry boost_mode_on=%s",
                         device_id,
                         payload.get("boost_mode_on"),
