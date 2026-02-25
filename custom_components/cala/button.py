@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import ATTR_DEVICE_ID, CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
-from .helpers import get_boost_entity_id
+from .boost_services import get_boost_entity_id
 _LOGGER = logging.getLogger(__name__)
 
 

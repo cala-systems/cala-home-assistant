@@ -1,4 +1,4 @@
-"""Cala MQTT command services: create_boost, create_vacation."""
+"""Cala MQTT command services: create_boost."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import logging
 from typing import Any
 
 from homeassistant.components import mqtt
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 import voluptuous as vol
 
@@ -17,28 +16,14 @@ from .helpers import get_command_topic
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_CREATE_BOOST = "create_boost"
-SERVICE_CREATE_VACATION = "create_vacation"
 SERVICE_OPEN_BOOST_DIALOG = "open_boost_dialog"
-SERVICE_OPEN_VACATION_DIALOG = "open_vacation_dialog"
 
 ATTR_HOURS = "hours"
-ATTR_VACATION_ID = "id"
-ATTR_START_DATE = "start_date"
-ATTR_END_DATE = "end_date"
 
 CREATE_BOOST_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): str,
         vol.Required(ATTR_HOURS): vol.In([6, 12, 24, 48]),
-    }
-)
-
-CREATE_VACATION_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_DEVICE_ID): str,
-        vol.Required(ATTR_VACATION_ID): str,
-        vol.Required(ATTR_START_DATE): vol.Coerce(int),
-        vol.Required(ATTR_END_DATE): vol.Coerce(int),
     }
 )
 
@@ -74,21 +59,6 @@ async def create_boost(hass: HomeAssistant, call: ServiceCall) -> None:
     await _publish_command(hass, device_id, payload)
 
 
-async def create_vacation(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Handle cala.create_vacation service call."""
-    device_id = call.data[ATTR_DEVICE_ID]
-    vacation_id = call.data[ATTR_VACATION_ID]
-    start_date = call.data[ATTR_START_DATE]
-    end_date = call.data[ATTR_END_DATE]
-    payload = {
-        "type": "create_vacation",
-        "id": vacation_id,
-        "startDate": start_date,
-        "endDate": end_date,
-    }
-    await _publish_command(hass, device_id, payload)
-
-
 def _get_entry_id_for_device(hass: HomeAssistant, device_id: str) -> str | None:
     """Get config entry ID for a device_id."""
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -110,26 +80,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN,
-        SERVICE_CREATE_VACATION,
-        lambda call: create_vacation(hass, call),
-        schema=CREATE_VACATION_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
         SERVICE_OPEN_BOOST_DIALOG,
         lambda call: open_boost_dialog(hass, call),
         schema=vol.Schema({vol.Required(ATTR_DEVICE_ID): str}),
     )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_OPEN_VACATION_DIALOG,
-        lambda call: open_vacation_dialog(hass, call),
-        schema=vol.Schema({vol.Required(ATTR_DEVICE_ID): str}),
-    )
     _LOGGER.debug(
-        "Cala services registered: %s, %s, %s, %s",
+        "Cala services registered: %s, %s",
         SERVICE_CREATE_BOOST,
-        SERVICE_CREATE_VACATION,
         SERVICE_OPEN_BOOST_DIALOG,
-        SERVICE_OPEN_VACATION_DIALOG,
     )
