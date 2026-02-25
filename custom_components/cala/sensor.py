@@ -269,7 +269,6 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
     def update_from_payload(self, payload: dict[str, Any]) -> None:
         raw = payload.get(self._key)
         coerced = _coerce_telemetry_value(self._key, raw)
-        # If coercion fails, ignore this update
         if coerced is None:
             return
         if self._scale != 1:
@@ -504,7 +503,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             e._attr_available = available
             e.async_write_ha_state()
 
-    _LOGGER.debug("CALA MQTT: sensor.py: async_setup_entry called")
     device_id = entry.data[CONF_DEVICE_ID]
     device_name = entry.data.get("device_name") or "Cala Water Heater"
     state_topic = entry.data["state_topic"]
@@ -540,6 +538,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     ]
     all_data_entities = sensors + binaries + totalizer_sensors
 
+    # Store boost binary sensor for boost_services to update on success
+    boost_binary = next((b for b in binaries if b._key == "boost_mode_on"), None)
+    if boost_binary:
+        hass.data.setdefault(DOMAIN, {}).setdefault("boost_entities", {})[
+            device_id
+        ] = boost_binary
+
     async_add_entities([connection_status] + sensors + binaries + totalizer_sensors)
     _set_entities_available(connection_status._attr_native_value == ConnectionStatus.CONNECTED.value)
 
@@ -570,11 +575,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             ConnectionStatus.PENDING.value,
             ConnectionStatus.OFFLINE.value,
         ):
-            was_offline = connection_status._attr_native_value == ConnectionStatus.OFFLINE.value
             connection_status.set_state(ConnectionStatus.CONNECTED)
             connection_status.async_write_ha_state()
-            if was_offline:
-                _set_entities_available(True)
+            _set_entities_available(True)
 
    
     def message_received(msg) -> None:
@@ -587,7 +590,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         """
         try:
             raw = _payload_to_str(msg.payload)
-
             try:
                 payload = json.loads(raw)
             except Exception as e:
@@ -599,12 +601,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 return
 
             async def _process_payload() -> None:
-                if "boost_mode_on" in payload:
-                    _LOGGER.debug(
-                        "Cala sensor: device_id=%s telemetry boost_mode_on=%s",
-                        device_id,
-                        payload.get("boost_mode_on"),
-                    )
                 energy = _coerce_float(payload.get("energy_used_kwh"))
                 liters = _coerce_float(payload.get("liters_used"))
                 totalizer.update(energy, liters)
@@ -612,7 +608,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 _mark_connected_if_needed()
                 _refresh_timeout()
 
-                # Update entities with coercion/ignore semantics.
                 for s in sensors:
                     try:
                         s.update_from_payload(payload)

@@ -123,4 +123,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cancel_timeout()
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
+    device_id = entry_data.get(CONF_DEVICE_ID) or entry.data.get(CONF_DEVICE_ID)
+    if device_id:
+        boost_entities = (hass.data.get(DOMAIN) or {}).get("boost_entities") or {}
+        if device_id in boost_entities:
+            del boost_entities[device_id]
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

@@ -35,9 +35,15 @@ async def _execute_boost_command(
         hass, command_topic, payload, RESPONSE_TIMEOUT_S
     )
 
-    boost_entity_id = get_boost_entity_id(hass, device_id)
-    if boost_entity_id:
-        hass.states.async_set(boost_entity_id, boost_state)
+    # Update the boost binary sensor's internal state so it persists (not overwritten by next MQTT)
+    boost_entity = (hass.data.get(DOMAIN) or {}).get("boost_entities", {}).get(device_id)
+    if boost_entity:
+        boost_entity._attr_is_on = boost_state == "on"
+        boost_entity.async_write_ha_state()
+    else:
+        boost_entity_id = get_boost_entity_id(hass, device_id)
+        if boost_entity_id:
+            hass.states.async_set(boost_entity_id, boost_state)
 
     await hass.services.async_call(
         "persistent_notification",
