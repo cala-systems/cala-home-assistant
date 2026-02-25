@@ -28,6 +28,8 @@ DEFAULT_COMMAND_TOPIC_TPL = "cala/{device_id}/command"
 DEVICE_MANUFACTURER = "Cala Systems"
 DEVICE_MODEL = "Cala Water Heater"
 
+LITERS_TO_GALLONS = 0.264172  # US gallons per liter
+
 SERVICE_START_BOOST = "start_boost"
 SERVICE_STOP_BOOST = "stop_boost"
 

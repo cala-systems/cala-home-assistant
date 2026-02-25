@@ -32,6 +32,7 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
+    LITERS_TO_GALLONS,
     ConnectionStatus,
 )
 from .helpers import parse_mqtt_json_payload
@@ -39,7 +40,6 @@ from .helpers import parse_mqtt_json_payload
 _LOGGER = logging.getLogger(__name__)
 
 CONNECTION_TIMEOUT_S = 300  # 5 minutes without data → offline
-LITERS_TO_GALLONS = 0.264172  # US gallons per liter
 
 TELEMETRY_FIELDS = {
     "top_c": {
