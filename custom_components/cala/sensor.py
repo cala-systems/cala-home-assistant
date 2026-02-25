@@ -471,7 +471,6 @@ class CalaWaterTodaySensor(CalaBase, SensorEntity):
             round(raw * LITERS_TO_GALLONS, 2) if raw is not None else None
         )
         self._attr_last_reset = self._totalizer.today_last_reset()
-        self._attr_last_reset = self._totalizer.today_last_reset()
 
 
 class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
@@ -607,8 +606,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                         payload.get("boost_mode_on"),
                     )
                 energy = _coerce_float(payload.get("energy_used_kwh"))
-                gallons = _coerce_float(payload.get("gallons_used"))
-                totalizer.update(energy, gallons)
+                liters = _coerce_float(payload.get("liters_used"))
+                totalizer.update(energy, liters)
 
                 _mark_connected_if_needed()
                 _refresh_timeout()
