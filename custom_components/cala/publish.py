@@ -6,6 +6,8 @@ from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
+from .const import CONF_DEVICE_ID
+
 _LOGGER = logging.getLogger(__name__)
 
 # ---- Constants ----
@@ -101,7 +103,7 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     - strict on validation
     """
 
-    device_id = entry.data.get("device_id")
+    device_id = entry.data.get(CONF_DEVICE_ID)
     if not device_id:
         _LOGGER.error("Missing device_id in config entry")
         return

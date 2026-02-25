@@ -4,12 +4,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
+from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 
 OPTION_KEYS = (
     "solar_production_entity",
@@ -30,8 +31,14 @@ def _entity_id_from_option(value):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("CALA MQTT: __init__.py async_setup_entry called")
-    device_id = entry.data.get("device_id", "?")
+
+    # Ensure domain storage exists BEFORE forwarding platforms
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault(entry.entry_id, {})
+
+    device_id = entry.data.get(CONF_DEVICE_ID, "?")
     opts = entry.options or {}
+
     _LOGGER.info(
         "Cala setup entry_id=%s device_id=%s options=%s",
         entry.entry_id,
@@ -39,9 +46,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         opts,
     )
 
+    # Store device_id for this entry (used by button/platforms/services if needed)
+    hass.data[DOMAIN][entry.entry_id][CONF_DEVICE_ID] = device_id
+
+    # Register services once (not per entry)
+    if not hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
+        hass.services.async_register(DOMAIN, SERVICE_START_BOOST, handle_start_boost)
+    if not hass.services.has_service(DOMAIN, SERVICE_STOP_BOOST):
+        hass.services.async_register(DOMAIN, SERVICE_STOP_BOOST, handle_stop_boost)
+
+    # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Build list of entity_ids from options (selector may store dict or string)
+    # Build list of entity_ids from options
     tracked_entities = []
     for key in OPTION_KEYS:
         entity_id = _entity_id_from_option(opts.get(key))
@@ -66,12 +83,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_id = data["entity_id"]
         old_state = data.get("old_state")
         new_state = data.get("new_state")
+
         _LOGGER.info(
             "Cala context: state change %s (%s → %s), publishing",
             entity_id,
             old_state.state if old_state else None,
             new_state.state if new_state else None,
         )
+
         hass.async_create_task(publish_context(hass, entry))
 
     unsub = async_track_state_change_event(
@@ -80,11 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _state_changed,
     )
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = (
-        hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
-    )
     hass.data[DOMAIN][entry.entry_id]["state_unsub"] = unsub
-
     return True
 
 
@@ -108,4 +123,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cancel_timeout()
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
+    device_id = entry_data.get(CONF_DEVICE_ID) or entry.data.get(CONF_DEVICE_ID)
+    if device_id:
+        boost_entities = (hass.data.get(DOMAIN) or {}).get("boost_entities") or {}
+        if device_id in boost_entities:
+            del boost_entities[device_id]
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

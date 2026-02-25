@@ -11,7 +11,6 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 
 from .const import (
-    CONF_AVAILABILITY_TOPIC,
     CONF_BROKER_HOST,
     CONF_BROKER_PORT,
     CONF_COMMAND_TOPIC,
@@ -203,19 +202,12 @@ def _extract_pairing_fields(device_id: str, device_name: str, resp: dict) -> dic
         or default_command
     )
 
-    availability_topic = (
-        topics.get("availability")
-        or resp.get(CONF_AVAILABILITY_TOPIC)
-        or resp.get("availability_topic")
-        or default_availability
-    )
 
     data: dict = {
         CONF_DEVICE_NAME: device_name,
         CONF_DEVICE_ID: device_id,
         CONF_STATE_TOPIC: state_topic,
         CONF_COMMAND_TOPIC: command_topic,
-        CONF_AVAILABILITY_TOPIC: availability_topic,
     }
 
     token = resp.get("token") or resp.get("auth_token") or resp.get(CONF_PAIRING_TOKEN)
