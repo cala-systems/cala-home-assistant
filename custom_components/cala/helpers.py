@@ -12,9 +12,18 @@ from homeassistant.helpers.entity_registry import (
     async_get as async_get_entity_registry,
 )
 
-from .const import DOMAIN
+from .const import CONF_COMMAND_TOPIC, CONF_DEVICE_ID, DOMAIN
 
 BOOST_UNIQUE_ID_SUFFIX = "_boost_mode_on"
+
+
+def get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
+    """Resolve command topic for device_id from config entries."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get(CONF_DEVICE_ID) == device_id:
+            topic = entry.data.get(CONF_COMMAND_TOPIC)
+            return topic or f"cala/{device_id}/command"
+    return None
 
 
 def _normalize_mqtt_payload(payload) -> str:

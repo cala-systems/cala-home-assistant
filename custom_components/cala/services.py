@@ -11,7 +11,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 import voluptuous as vol
 
-from .const import CONF_COMMAND_TOPIC, CONF_DEVICE_ID, DOMAIN
+from .const import CONF_DEVICE_ID, DOMAIN
+from .helpers import get_command_topic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,23 +44,11 @@ CREATE_VACATION_SCHEMA = vol.Schema(
 )
 
 
-def _get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
-    """Resolve command topic for device_id from config entries."""
-    entries = hass.config_entries.async_entries(DOMAIN)
-    for entry in entries:
-        if entry.data.get(CONF_DEVICE_ID) == device_id:
-            topic = entry.data.get(CONF_COMMAND_TOPIC)
-            if topic:
-                return topic
-            return f"cala/{device_id}/command"
-    return None
-
-
 async def _publish_command(
     hass: HomeAssistant, device_id: str, payload: dict[str, Any]
 ) -> bool:
     """Publish command to device. Returns True on success."""
-    topic = _get_command_topic(hass, device_id)
+    topic = get_command_topic(hass, device_id)
     if not topic:
         _LOGGER.error("Cala: no config entry for device_id=%s", device_id)
         return False
@@ -107,28 +96,6 @@ def _get_entry_id_for_device(hass: HomeAssistant, device_id: str) -> str | None:
         if entry.data.get(CONF_DEVICE_ID) == device_id:
             return entry.entry_id
     return None
-
-
-async def open_boost_dialog(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Open boost duration selection dialog via options flow."""
-    device_id = call.data[ATTR_DEVICE_ID]
-    entry_id = _get_entry_id_for_device(hass, device_id)
-    if not entry_id:
-        _LOGGER.error("Cala: no config entry for device_id=%s", device_id)
-        return
-    hass.data.setdefault(DOMAIN, {})["_pending_dialog"] = (entry_id, "create_boost")
-    hass.config_entries.options.async_init(entry_id)
-
-
-async def open_vacation_dialog(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Open vacation creation dialog via options flow."""
-    device_id = call.data[ATTR_DEVICE_ID]
-    entry_id = _get_entry_id_for_device(hass, device_id)
-    if not entry_id:
-        _LOGGER.error("Cala: no config entry for device_id=%s", device_id)
-        return
-    hass.data.setdefault(DOMAIN, {})["_pending_dialog"] = (entry_id, "create_vacation")
-    hass.config_entries.options.async_init(entry_id)
 
 
 def async_setup_services(hass: HomeAssistant) -> None:

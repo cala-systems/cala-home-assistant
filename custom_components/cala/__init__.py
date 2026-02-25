@@ -1,18 +1,16 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import CONF_COMMAND_TOPIC, CONF_DEVICE_ID, DOMAIN
-from .helpers import get_boost_entity_id, publish_command_and_wait_response
+from .const import DOMAIN
+from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "button"]
-RESPONSE_TIMEOUT_S = 10
 
 OPTION_KEYS = (
     "solar_production_entity",
@@ -126,89 +124,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-def _get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
-    """Resolve command topic for device_id from config entries."""
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.data.get(CONF_DEVICE_ID) == device_id:
-            topic = entry.data.get(CONF_COMMAND_TOPIC)
-            return topic or f"cala/{device_id}/command"
-    return None
-
-
-async def handle_start_boost(call: ServiceCall) -> None:
-    """Service: cala.start_boost -> publish boost config over MQTT, wait for device response."""
-    hass = call.hass
-
-    _LOGGER.info("Cala handle_start_boost: call=%s", call)
-
-    device_id = call.data.get("device_id")
-    duration_hours = int(call.data.get("duration", 24))  # default 24h
-
-    if not device_id:
-        raise HomeAssistantError("device_id is required")
-
-    command_topic = _get_command_topic(hass, device_id)
-    if not command_topic:
-        raise HomeAssistantError(f"Unknown device_id: {device_id}")
-
-    payload = {"type": "create_boost", "hours": duration_hours}
-    await publish_command_and_wait_response(
-        hass, command_topic, payload, RESPONSE_TIMEOUT_S
-    )
-
-    _LOGGER.info(
-        "Cala start_boost: device accepted device_id=%s payload=%s",
-        device_id,
-        payload,
-    )
-    # Update boost sensor state immediately so UI reflects success
-    boost_entity_id = get_boost_entity_id(hass, device_id)
-    if boost_entity_id:
-        hass.states.async_set(boost_entity_id, "on")
-    await hass.services.async_call(
-        "persistent_notification",
-        "create",
-        {
-            "message": f"Boost started for {duration_hours} hours",
-            "title": "Cala Boost",
-            "notification_id": f"cala_boost_{device_id}",
-        },
-        blocking=True,
-    )
-
-
-async def handle_stop_boost(call: ServiceCall) -> None:
-    """Service: cala.stop_boost -> publish boost disable over MQTT, wait for device response."""
-    hass = call.hass
-
-    _LOGGER.info("Cala handle_stop_boost: call=%s", call)
-    device_id = call.data.get("device_id")
-    if not device_id:
-        raise HomeAssistantError("device_id is required")
-
-    command_topic = _get_command_topic(hass, device_id)
-    if not command_topic:
-        raise HomeAssistantError(f"Unknown device_id: {device_id}")
-
-    payload = {"type": "cancel_boost"}
-    await publish_command_and_wait_response(
-        hass, command_topic, payload, RESPONSE_TIMEOUT_S
-    )
-
-    _LOGGER.info("Cala stop_boost: device accepted device_id=%s", device_id)
-    # Update boost sensor state immediately so UI reflects success
-    boost_entity_id = get_boost_entity_id(hass, device_id)
-    if boost_entity_id:
-        hass.states.async_set(boost_entity_id, "off")
-    await hass.services.async_call(
-        "persistent_notification",
-        "create",
-        {
-            "message": "Boost stopped",
-            "title": "Cala Boost",
-            "notification_id": f"cala_boost_{device_id}",
-        },
-        blocking=True,
-    )
