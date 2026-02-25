@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 import voluptuous as vol
 
-from .const import CONF_DEVICE_ID, DOMAIN
+from .const import ATTR_DEVICE_ID, CONF_DEVICE_ID, DOMAIN
 from .helpers import get_command_topic
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,7 +21,6 @@ SERVICE_CREATE_VACATION = "create_vacation"
 SERVICE_OPEN_BOOST_DIALOG = "open_boost_dialog"
 SERVICE_OPEN_VACATION_DIALOG = "open_vacation_dialog"
 
-ATTR_DEVICE_ID = "device_id"
 ATTR_HOURS = "hours"
 ATTR_VACATION_ID = "id"
 ATTR_START_DATE = "start_date"

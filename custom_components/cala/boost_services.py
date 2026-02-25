@@ -5,6 +5,7 @@ import logging
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
+from .const import ATTR_DEVICE_ID
 from .helpers import (
     get_boost_entity_id,
     get_command_topic,
@@ -51,13 +52,13 @@ async def _execute_boost_command(
 async def handle_start_boost(call: ServiceCall) -> None:
     """Service: cala.start_boost -> publish boost config over MQTT, wait for device response."""
     hass = call.hass
-    device_id = call.data.get("device_id")
+    device_id = call.data.get(ATTR_DEVICE_ID)
     duration_hours = int(call.data.get("duration", 24))
 
     if not device_id:
         raise HomeAssistantError("device_id is required")
 
-    _LOGGER.info("Cala handle_start_boost: device_id=%s duration=%sh", device_id, duration_hours)
+    _LOGGER.debug("Cala handle_start_boost: device_id=%s duration=%sh", device_id, duration_hours)
 
     payload = {"type": "create_boost", "hours": duration_hours}
     await _execute_boost_command(
@@ -67,18 +68,18 @@ async def handle_start_boost(call: ServiceCall) -> None:
         boost_state="on",
         message=f"Boost started for {duration_hours} hours",
     )
-    _LOGGER.info("Cala start_boost: device accepted device_id=%s payload=%s", device_id, payload)
+    _LOGGER.debug("Cala start_boost: device accepted device_id=%s payload=%s", device_id, payload)
 
 
 async def handle_stop_boost(call: ServiceCall) -> None:
     """Service: cala.stop_boost -> publish boost disable over MQTT, wait for device response."""
     hass = call.hass
-    device_id = call.data.get("device_id")
+    device_id = call.data.get(ATTR_DEVICE_ID)
 
     if not device_id:
         raise HomeAssistantError("device_id is required")
 
-    _LOGGER.info("Cala handle_stop_boost: device_id=%s", device_id)
+    _LOGGER.debug("Cala handle_stop_boost: device_id=%s", device_id)
 
     payload = {"type": "cancel_boost"}
     await _execute_boost_command(
@@ -88,4 +89,4 @@ async def handle_stop_boost(call: ServiceCall) -> None:
         boost_state="off",
         message="Boost stopped",
     )
-    _LOGGER.info("Cala stop_boost: device accepted device_id=%s", device_id)
+    _LOGGER.debug("Cala stop_boost: device accepted device_id=%s", device_id)

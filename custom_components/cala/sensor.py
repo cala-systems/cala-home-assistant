@@ -28,6 +28,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_COMMAND_TOPIC,
+    CONF_DEVICE_ID,
     DEVICE_MANUFACTURER,
     DEVICE_MODEL,
     DOMAIN,
@@ -505,7 +506,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             e.async_write_ha_state()
 
     _LOGGER.debug("CALA MQTT: sensor.py: async_setup_entry called")
-    device_id = entry.data["device_id"]
+    device_id = entry.data[CONF_DEVICE_ID]
     device_name = entry.data.get("device_name") or "Cala Water Heater"
     state_topic = entry.data["state_topic"]
     command_topic = entry.data.get(CONF_COMMAND_TOPIC) or f"cala/{device_id}/command"

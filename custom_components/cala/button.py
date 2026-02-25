@@ -7,9 +7,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.event import async_track_state_change_event
 
+from .const import ATTR_DEVICE_ID, CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
 from .helpers import get_boost_entity_id
-
-DOMAIN = "cala"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -45,55 +44,30 @@ class BoostButton(ButtonEntity):
             return
 
         initial_state = self._hass.states.get(self._boost_entity_id)
-        _LOGGER.info(
+        _LOGGER.debug(
             "Cala button: device_id=%s subscribing to %s, initial_state=%s",
             self._device_id,
             self._boost_entity_id,
             initial_state.state if initial_state else "None",
         )
         # Set initial name/icon from current boost state
-        if initial_state and initial_state.state == "on":
-            self._attr_name = "Stop Boost"
-            self._attr_icon = "mdi:stop-circle"
-        else:
-            self._attr_name = "Start 24h Boost"
-            self._attr_icon = "mdi:play-circle"
-
-        # Update entity registry on init so device page shows correct name
-        if self.entity_id:
-            ent_reg = async_get_entity_registry(self._hass)
-            ent_reg.async_update_entity(
-                self.entity_id,
-                name=self._attr_name,
-                icon=self._attr_icon,
-            )
+        self._update_name_and_icon(initial_state is not None and initial_state.state == "on")
+        self._sync_entity_registry()
 
         @callback
         def _boost_state_changed(event):
             new_state = event.data.get("new_state")
             old_state = event.data.get("old_state")
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Cala button: boost state changed device_id=%s %s -> %s",
                 self._device_id,
                 old_state.state if old_state else "None",
                 new_state.state if new_state else "None",
             )
             # Update entity state
-            if new_state and new_state.state == "on":
-                self._attr_name = "Stop Boost"
-                self._attr_icon = "mdi:stop-circle"
-            else:
-                self._attr_name = "Start 24h Boost"
-                self._attr_icon = "mdi:play-circle"
+            self._update_name_and_icon(new_state is not None and new_state.state == "on")
             self.async_write_ha_state()
-            # Update entity registry so device page shows correct name (it uses registry, not state)
-            if self.entity_id:
-                ent_reg = async_get_entity_registry(self._hass)
-                ent_reg.async_update_entity(
-                    self.entity_id,
-                    name=self._attr_name,
-                    icon=self._attr_icon,
-                )
+            self._sync_entity_registry()
 
         self.async_on_remove(
             async_track_state_change_event(
@@ -110,6 +84,25 @@ class BoostButton(ButtonEntity):
         state = self._hass.states.get(self._boost_entity_id)
         return state is not None and state.state == "on"
 
+    def _update_name_and_icon(self, boost_on: bool) -> None:
+        """Set name and icon based on boost state."""
+        if boost_on:
+            self._attr_name = "Stop Boost"
+            self._attr_icon = "mdi:stop-circle"
+        else:
+            self._attr_name = "Start 24h Boost"
+            self._attr_icon = "mdi:play-circle"
+
+    def _sync_entity_registry(self) -> None:
+        """Update entity registry with current name/icon so device page displays correctly."""
+        if self.entity_id:
+            ent_reg = async_get_entity_registry(self._hass)
+            ent_reg.async_update_entity(
+                self.entity_id,
+                name=self._attr_name,
+                icon=self._attr_icon,
+            )
+
     @property
     def name(self) -> str:
         """Return the name based on boost state."""
@@ -123,26 +116,26 @@ class BoostButton(ButtonEntity):
     async def async_press(self) -> None:
         """Start or stop boost based on current state."""
         boost_on = self._boost_is_on()
-        _LOGGER.info(
+        _LOGGER.debug(
             "Cala button: async_press device_id=%s boost_is_on=%s -> %s",
             self._device_id,
             boost_on,
-            "stop_boost" if boost_on else "start_boost",
+            SERVICE_STOP_BOOST if boost_on else SERVICE_START_BOOST,
         )
         if boost_on:
             await self._hass.services.async_call(
                 DOMAIN,
-                "stop_boost",
-                {"device_id": self._device_id},
+                SERVICE_STOP_BOOST,
+                {ATTR_DEVICE_ID: self._device_id},
                 blocking=True,
             )
             return
 
         await self._hass.services.async_call(
             DOMAIN,
-            "start_boost",
+            SERVICE_START_BOOST,
             {
-                "device_id": self._device_id,
+                ATTR_DEVICE_ID: self._device_id,
                 "duration": 24,
             },
             blocking=True,
@@ -154,7 +147,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities,
 ):
-    device_id = entry.data["device_id"]
+    device_id = entry.data[CONF_DEVICE_ID]
     boost_entity_id = get_boost_entity_id(hass, device_id)
     _LOGGER.info(
         "Cala button: async_setup_entry device_id=%s boost_entity_id=%s",

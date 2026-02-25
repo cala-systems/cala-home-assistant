@@ -4,7 +4,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
 from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
 
@@ -36,7 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
 
-    device_id = entry.data.get("device_id", "?")
+    device_id = entry.data.get(CONF_DEVICE_ID, "?")
     opts = entry.options or {}
 
     _LOGGER.info(
@@ -47,13 +47,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Store device_id for this entry (used by button/platforms/services if needed)
-    hass.data[DOMAIN][entry.entry_id]["device_id"] = device_id
+    hass.data[DOMAIN][entry.entry_id][CONF_DEVICE_ID] = device_id
 
     # Register services once (not per entry)
-    if not hass.services.has_service(DOMAIN, "start_boost"):
-        hass.services.async_register(DOMAIN, "start_boost", handle_start_boost)
-    if not hass.services.has_service(DOMAIN, "stop_boost"):
-        hass.services.async_register(DOMAIN, "stop_boost", handle_stop_boost)
+    if not hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
+        hass.services.async_register(DOMAIN, SERVICE_START_BOOST, handle_start_boost)
+    if not hass.services.has_service(DOMAIN, SERVICE_STOP_BOOST):
+        hass.services.async_register(DOMAIN, SERVICE_STOP_BOOST, handle_stop_boost)
 
     # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
