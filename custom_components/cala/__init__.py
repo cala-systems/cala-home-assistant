@@ -1,15 +1,12 @@
-import asyncio
-import json
 import logging
 
-from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import CONF_COMMAND_TOPIC, CONF_DEVICE_ID, DOMAIN
-from .helpers import get_boost_entity_id
+from .helpers import get_boost_entity_id, publish_command_and_wait_response
 from .publish import publish_context
 
 _LOGGER = logging.getLogger(__name__)
@@ -156,56 +153,10 @@ async def handle_start_boost(call: ServiceCall) -> None:
     if not command_topic:
         raise HomeAssistantError(f"Unknown device_id: {device_id}")
 
-    response_topic = f"{command_topic.rstrip('/')}/response"
-
-    payload = {
-        "type": "create_boost",
-        "hours": duration_hours,
-    }
-
-    response_received = asyncio.Event()
-    result: dict[str, str | None] = {"status": None, "reason": None}
-
-    @callback
-    def _on_response(msg) -> None:
-        try:
-            raw = msg.payload
-            if isinstance(raw, (bytes, bytearray)):
-                raw = raw.decode("utf-8", errors="replace")
-            data = json.loads(raw) if isinstance(raw, str) else {}
-            if isinstance(data, dict):
-                result["status"] = data.get("status")
-                result["reason"] = data.get("reason") or "unknown"
-        except (json.JSONDecodeError, TypeError):
-            pass
-        response_received.set()
-
-    unsub = await mqtt.async_subscribe(hass, response_topic, _on_response, qos=1)
-    try:
-        await mqtt.async_publish(
-            hass,
-            topic=command_topic,
-            payload=json.dumps(payload),
-            qos=1,
-            retain=False,
-        )
-        try:
-            await asyncio.wait_for(response_received.wait(), timeout=RESPONSE_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            raise HomeAssistantError(
-                f"No response from device within {RESPONSE_TIMEOUT_S} seconds"
-            )
-    finally:
-        unsub()
-
-    if result["status"] == "rejected":
-        raise HomeAssistantError(
-            f"Device rejected command: {result.get('reason', 'unknown')}"
-        )
-    if result["status"] != "accepted":
-        raise HomeAssistantError(
-            f"Unexpected response from device: {result.get('status', 'unknown')}"
-        )
+    payload = {"type": "create_boost", "hours": duration_hours}
+    await publish_command_and_wait_response(
+        hass, command_topic, payload, RESPONSE_TIMEOUT_S
+    )
 
     _LOGGER.info(
         "Cala start_boost: device accepted device_id=%s payload=%s",
@@ -241,52 +192,10 @@ async def handle_stop_boost(call: ServiceCall) -> None:
     if not command_topic:
         raise HomeAssistantError(f"Unknown device_id: {device_id}")
 
-    response_topic = f"{command_topic.rstrip('/')}/response"
     payload = {"type": "cancel_boost"}
-
-    response_received = asyncio.Event()
-    result: dict[str, str | None] = {"status": None, "reason": None}
-
-    @callback
-    def _on_response(msg) -> None:
-        try:
-            raw = msg.payload
-            if isinstance(raw, (bytes, bytearray)):
-                raw = raw.decode("utf-8", errors="replace")
-            data = json.loads(raw) if isinstance(raw, str) else {}
-            if isinstance(data, dict):
-                result["status"] = data.get("status")
-                result["reason"] = data.get("reason") or "unknown"
-        except (json.JSONDecodeError, TypeError):
-            pass
-        response_received.set()
-
-    unsub = await mqtt.async_subscribe(hass, response_topic, _on_response, qos=1)
-    try:
-        await mqtt.async_publish(
-            hass,
-            topic=command_topic,
-            payload=json.dumps(payload),
-            qos=1,
-            retain=False,
-        )
-        try:
-            await asyncio.wait_for(response_received.wait(), timeout=RESPONSE_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            raise HomeAssistantError(
-                f"No response from device within {RESPONSE_TIMEOUT_S} seconds"
-            )
-    finally:
-        unsub()
-
-    if result["status"] == "rejected":
-        raise HomeAssistantError(
-            f"Device rejected command: {result.get('reason', 'unknown')}"
-        )
-    if result["status"] != "accepted":
-        raise HomeAssistantError(
-            f"Unexpected response from device: {result.get('status', 'unknown')}"
-        )
+    await publish_command_and_wait_response(
+        hass, command_topic, payload, RESPONSE_TIMEOUT_S
+    )
 
     _LOGGER.info("Cala stop_boost: device accepted device_id=%s", device_id)
     # Update boost sensor state immediately so UI reflects success

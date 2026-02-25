@@ -33,6 +33,7 @@ from .const import (
     DOMAIN,
     ConnectionStatus,
 )
+from .helpers import parse_mqtt_json_payload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -643,13 +644,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     def _on_command_response(msg) -> None:
         """Handle device responses to commands (accepted/rejected)."""
         try:
-            raw = _payload_to_str(msg.payload)
-            try:
-                payload = json.loads(raw)
-            except Exception as e:
-                _LOGGER.warning("Invalid JSON on %s: %s (%s)", response_topic, raw, e)
-                return
-            if not isinstance(payload, dict):
+            payload = parse_mqtt_json_payload(msg.payload)
+            if not payload:
+                _LOGGER.debug("Invalid or non-dict JSON on %s", response_topic)
                 return
             status = payload.get("status")
             if status == "accepted":
