@@ -34,6 +34,22 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Discovery path (keeps existing behavior)."""
         return self.async_abort(reason="use_zeroconf")
     
+    async def async_step_reauth(self, user_input=None):
+        """Handle reauth (credentials/device reprovision needed)."""
+        entry_id = self.context.get("entry_id")
+        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        if entry is None:
+            return self.async_abort(reason="invalid_discovery")
+
+        self._reauth_entry = entry
+
+        self._discovery_host = (entry.data.get("device_host") or "").strip()
+        self._discovery_port = entry.data.get("device_port") or 80
+        self._discovery_device_id = entry.data.get("device_id")
+
+        # Reuse the existing provision step UX
+        return await self.async_step_provision(user_input)
+    
     def _manual_device_schema(self):
         return vol.Schema(
             {
@@ -181,6 +197,13 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DEVICE_PORT: port,
                 "_connection_initial_state": ConnectionStatus.PENDING,
             }
+
+            # If this provision is happening as part of reauthentication, update existing entry instead of creating a new one
+            reauth_entry = getattr(self, "_reauth_entry", None)
+            if reauth_entry is not None:
+                self.hass.config_entries.async_update_entry(reauth_entry, data=data)
+                await self.hass.config_entries.async_reload(reauth_entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
 
             return self.async_create_entry(
                 title=f"Cala Device ({data.get(CONF_DEVICE_NAME, device_id)})",

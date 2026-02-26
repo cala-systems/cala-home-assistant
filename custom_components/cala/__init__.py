@@ -9,7 +9,7 @@ from .publish import publish_context
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 
 OPTION_KEYS = (
     "solar_production_entity",
@@ -106,6 +106,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_timeout = entry_data.get("timeout_timer")
     if callable(cancel_timeout):
         cancel_timeout()
+    cancel_repair = entry_data.get("repair_timer")
+    if callable(cancel_repair):
+        cancel_repair()
+    clear_issue = entry_data.get("repair_issue_clear")
+    if callable(clear_issue):
+        clear_issue()
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

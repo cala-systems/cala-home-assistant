@@ -23,12 +23,15 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import issue_registry as ir
 
-from .const import CONNECTION_STATUS, DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, ConnectionStatus
+from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, ConnectionStatus
 
 _LOGGER = logging.getLogger(__name__)
 
 CONNECTION_TIMEOUT_S = 300  # 5 minutes without data → offline
+REPAIR_OFFLINE_AFTER_S = 900  # 15 minutes offline → raise a Repair Issue
+REPAIR_ISSUE_ID_TPL = "offline_prolonged_{device_id}"
 
 TELEMETRY_FIELDS = {
     "top_c": {
@@ -237,7 +240,14 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
         self._attr_native_unit_of_measurement = meta.get("unit")
         self._attr_device_class = meta.get("device_class")
         self._attr_entity_category = meta.get("entity_category")
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        # Most telemetry values are numeric measurements but string fields (fw_version, wifi_ip, wifi_ssid) should not declare a state_class,
+        # because HA assumes they are numeric and will throw on async_write_ha_state error.
+        if key in ("fw_version", "wifi_ip", "wifi_ssid"):
+            self._attr_state_class = None
+        elif key in ("energy_used_kwh", "gallons_used"):
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        else:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_value = None
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
@@ -445,14 +455,65 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     all_data_entities = sensors + binaries + totalizer_sensors
 
     async_add_entities([connection_status] + sensors + binaries + totalizer_sensors)
-    _set_entities_available(connection_status._attr_native_value == ConnectionStatus.CONNECTED.value)
 
     timeout_timer_handle = None
+    repair_timer_handle = None
+
+    def _call_on_loop(func, *args) -> None:
+        hass.loop.call_soon_threadsafe(func, *args)
+
+    def _repair_issue_id() -> str:
+        return REPAIR_ISSUE_ID_TPL.format(device_id=device_id)
+
+    def _create_repair_issue() -> None:
+        # Called only after prolonged offline (15 min)
+        try:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                _repair_issue_id(),
+                is_fixable=True,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=None,
+                title=f"Cala device {device_id} appears offline",
+                description=(
+                    "Your Cala device has been offline for an extended period.\n\n"
+                    "If the device was reset or re-paired, you likely need to re-provision it.\n\n"
+                    "Go to: Settings → Devices & services → Cala → Configure → "
+                    "Re-provision device (pairing code, broker, credentials)."
+                ),
+            )
+        except Exception:
+            _LOGGER.exception("Failed to create repair issue for %s", device_id)
+
+    def _delete_repair_issue() -> None:
+        try:
+            ir.async_delete_issue(hass, DOMAIN, _repair_issue_id())
+        except Exception:
+            # delete should be best-effort and silent-ish
+            _LOGGER.debug("No repair issue to delete for %s", device_id)
+
+    def _schedule_repair_issue() -> None:
+        nonlocal repair_timer_handle
+        if repair_timer_handle is not None:
+            repair_timer_handle.cancel()
+        repair_timer_handle = hass.loop.call_later(REPAIR_OFFLINE_AFTER_S, _create_repair_issue)
+
+    def _clear_repair_issue_and_timer() -> None:
+        nonlocal repair_timer_handle
+        if repair_timer_handle is not None:
+            repair_timer_handle.cancel()
+            repair_timer_handle = None
+        _delete_repair_issue()
 
     def _set_entities_available(available: bool) -> None:
-        for e in all_data_entities:
-            e._attr_available = available
-            e.async_write_ha_state()
+        def _do() -> None:
+            for e in all_data_entities:
+                e._attr_available = available
+                e.async_write_ha_state()
+        _call_on_loop(_do)
+    
+    _set_entities_available(connection_status._attr_native_value == ConnectionStatus.CONNECTED.value)
 
     @callback
     def _on_timeout() -> None:
@@ -461,6 +522,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         connection_status.set_state(ConnectionStatus.OFFLINE)
         connection_status.async_write_ha_state()
         _set_entities_available(False)
+        _schedule_repair_issue()
         _LOGGER.info(
             "Cala device %s: no valid telemetry for %ds, set offline",
             device_id,
@@ -479,44 +541,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             ConnectionStatus.PENDING.value,
             ConnectionStatus.OFFLINE.value,
         ):
-            was_offline = connection_status._attr_native_value == ConnectionStatus.OFFLINE.value
             connection_status.set_state(ConnectionStatus.CONNECTED)
             connection_status.async_write_ha_state()
-            if was_offline:
-                _set_entities_available(True)
+            _clear_repair_issue_and_timer()
+            _set_entities_available(True)
 
     def availability_received(msg) -> None:
-        """
-        Availability is authoritative for online/offline. It must never raise.
-        Accepted: 'online' / 'offline' (case-insensitive), anything else is ignored.
-        """
-        try:
-            raw = _payload_to_str(msg.payload).strip().lower()
-            if raw not in ("online", "offline"):
-                _LOGGER.debug("Ignoring availability payload on %s: %r", availability_topic, raw)
-                return
+        """MQTT availability handler"""
 
-            if raw == "offline":
-                nonlocal timeout_timer_handle
-                if timeout_timer_handle is not None:
-                    timeout_timer_handle.cancel()
-                    timeout_timer_handle = None
-                if connection_status._attr_native_value != ConnectionStatus.OFFLINE:
-                    _LOGGER.info("Cala device %s availability=offline", device_id)
-                connection_status.set_state(ConnectionStatus.OFFLINE)
-                connection_status.async_write_ha_state()
-                _set_entities_available(False)
-                return
+        def _handle_on_loop() -> None:
+            try:
+                raw = _payload_to_str(msg.payload).strip().lower()
+                if raw not in ("online", "offline"):
+                    _LOGGER.debug("Ignoring availability payload on %s: %r", availability_topic, raw)
+                    return
 
-            # online
-            if connection_status._attr_native_value == ConnectionStatus.OFFLINE.value:
-                # Online but waiting for valid state telemetry
-                _LOGGER.info("Cala device %s availability=online", device_id)
-                connection_status.set_state(ConnectionStatus.PENDING)
-                connection_status.async_write_ha_state()
-                _set_entities_available(False)
-        except Exception:
-            _LOGGER.exception("Unhandled error in availability_received for %s", device_id)
+                # offline
+                if raw == "offline":
+                    nonlocal timeout_timer_handle
+                    if timeout_timer_handle is not None:
+                        timeout_timer_handle.cancel()
+                        timeout_timer_handle = None
+
+                    if connection_status._attr_native_value != ConnectionStatus.OFFLINE.value:
+                        _LOGGER.info("Cala device %s availability=offline", device_id)
+
+                    connection_status.set_state(ConnectionStatus.OFFLINE)
+                    connection_status.async_write_ha_state()
+                    _set_entities_available(False)
+                    _schedule_repair_issue()
+                    return
+
+                # online
+                if connection_status._attr_native_value == ConnectionStatus.OFFLINE.value:
+                    _LOGGER.info("Cala device %s availability=online", device_id)
+                    connection_status.set_state(ConnectionStatus.PENDING)
+                    connection_status.async_write_ha_state()
+                    _set_entities_available(False)
+            except Exception:
+                _LOGGER.exception("Unhandled error in availability_received for %s", device_id)
+
+        _call_on_loop(_handle_on_loop)
 
     def message_received(msg) -> None:
         """
@@ -569,7 +634,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     except Exception:
                         _LOGGER.exception("Error updating totalizer sensor %s", getattr(t, "_attr_name", "?"))
 
-            hass.async_create_task(_process_payload())
+            hass.loop.call_soon_threadsafe(hass.async_create_task, _process_payload())
         except Exception:
             _LOGGER.exception("Unhandled error in message_received for %s", device_id)
 
@@ -580,3 +645,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.data[DOMAIN][entry.entry_id]["timeout_timer"] = lambda: (
         timeout_timer_handle.cancel() if timeout_timer_handle is not None else None
     )
+    hass.data[DOMAIN][entry.entry_id]["repair_timer"] = lambda: (
+        repair_timer_handle.cancel() if repair_timer_handle is not None else None
+    )
+    hass.data[DOMAIN][entry.entry_id]["repair_issue_clear"] = _delete_repair_issue
+
