@@ -11,7 +11,17 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DEVICE_MANUFACTURER, DEVICE_MODEL, DOMAIN, CONF_DEVICE_ID, CONF_DEVICE_NAME, ATTR_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
+from .const import (
+    DEVICE_MANUFACTURER,
+    DEVICE_MODEL,
+    DOMAIN,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
+    ATTR_DEVICE_ID,
+    SERVICE_START_BOOST,
+    SERVICE_STOP_BOOST,
+    ConnectionStatus,
+)
 
 from .boost_services import get_boost_entity_id
 _LOGGER = logging.getLogger(__name__)
@@ -42,12 +52,14 @@ class CalaReconnectButton(ButtonEntity):
     async def async_press(self) -> None:
         """Reload the entry to re-run subscriptions and setup."""
         _LOGGER.info("Cala reconnect button pressed; reloading entry %s", self._entry_id)
+
+        entry = self._hass.config_entries.async_get_entry(self._entry_id)
+        if entry is not None:
+            data = dict(entry.data)
+            data["_connection_initial_state"] = ConnectionStatus.PENDING
+            self._hass.config_entries.async_update_entry(entry, data=data)
+
         await self._hass.config_entries.async_reload(self._entry_id)
-
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
-    async_add_entities([CalaReconnectButton(hass, entry)])
-
 
 class BoostButton(ButtonEntity):
     """Button that shows Start 24h Boost when off, Stop Boost when on."""
@@ -191,4 +203,10 @@ async def async_setup_entry(
         device_id,
         boost_entity_id,
     )
-    async_add_entities([BoostButton(hass, device_id, boost_entity_id)])
+
+    async_add_entities(
+        [
+            CalaReconnectButton(hass, entry),
+            BoostButton(hass, device_id, boost_entity_id),
+        ]
+    )
