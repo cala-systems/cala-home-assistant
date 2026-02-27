@@ -647,44 +647,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             _clear_repair_issue_and_timer()
             _set_entities_available(True)
 
-    def availability_received(msg) -> None:
-        """MQTT availability handler"""
-
-        def _handle_on_loop() -> None:
-            try:
-                raw = _payload_to_str(msg.payload).strip().lower()
-                if raw not in ("online", "offline"):
-                    _LOGGER.debug("Ignoring availability payload on %s: %r", availability_topic, raw)
-                    return
-
-                # offline
-                if raw == "offline":
-                    nonlocal timeout_timer_handle
-                    if timeout_timer_handle is not None:
-                        timeout_timer_handle.cancel()
-                        timeout_timer_handle = None
-
-                    if connection_status._attr_native_value != ConnectionStatus.OFFLINE.value:
-                        _LOGGER.info("Cala device %s availability=offline", device_id)
-
-                    connection_status.set_state(ConnectionStatus.OFFLINE)
-                    connection_status.async_write_ha_state()
-                    _set_entities_available(False)
-                    _schedule_repair_issue()
-                    return
-
-                # online
-                if connection_status._attr_native_value == ConnectionStatus.OFFLINE.value:
-                    _LOGGER.info("Cala device %s availability=online", device_id)
-                    connection_status.set_state(ConnectionStatus.PENDING)
-                    connection_status.async_write_ha_state()
-                    _set_entities_available(False)
-            except Exception:
-                _LOGGER.exception("Unhandled error in availability_received for %s", device_id)
-
-        _call_on_loop(_handle_on_loop)
-
-   
     def message_received(msg) -> None:
         """
         State telemetry handler.
