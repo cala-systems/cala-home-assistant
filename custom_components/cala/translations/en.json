@@ -4,7 +4,8 @@
     "abort": {
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
       "use_zeroconf": "Cala devices advertise themselves on the network. When one is discovered it will appear in the list above. Ensure the device is powered on and on the same network.",
-      "invalid_discovery": "Invalid discovery information. Please try again."
+      "invalid_discovery": "Invalid discovery information. Please try again.",
+      "reauth_successful": "Reconnected successfully. The Cala integration has been reloaded."
     },
     "error": {
       "cannot_connect": "Failed to connect. Please try again.",

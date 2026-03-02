@@ -1,16 +1,65 @@
+from __future__ import annotations
+
 import logging
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import ATTR_DEVICE_ID, CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
+from .const import (
+    DEVICE_MANUFACTURER,
+    DEVICE_MODEL,
+    DOMAIN,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
+    ATTR_DEVICE_ID,
+    SERVICE_START_BOOST,
+    SERVICE_STOP_BOOST,
+    ConnectionStatus,
+)
+
 from .boost_services import get_boost_entity_id
 _LOGGER = logging.getLogger(__name__)
 
+
+class CalaReconnectButton(ButtonEntity):
+    """Button that reloads the config entry in Settings -> Devices -> Cala -> [device] page"""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self._hass = hass
+        self._entry_id = entry.entry_id
+        self._device_id = entry.data.get(CONF_DEVICE_ID, "unknown")
+        device_name = entry.data.get(CONF_DEVICE_NAME) or "Cala Water Heater"
+
+        self._attr_name = f"{device_name} Reconnect"
+        self._attr_unique_id = f"cala_{self._device_id}_reconnect"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._device_id)},
+            "name": self.name.rsplit(" Reconnect", 1)[0],
+            "manufacturer": DEVICE_MANUFACTURER,
+            "model": DEVICE_MODEL,
+        }
+
+    async def async_press(self) -> None:
+        """Reload the entry to re-run subscriptions and setup."""
+        _LOGGER.info("Cala reconnect button pressed; reloading entry %s", self._entry_id)
+
+        entry = self._hass.config_entries.async_get_entry(self._entry_id)
+        if entry is not None:
+            data = dict(entry.data)
+            data["_connection_initial_state"] = ConnectionStatus.PENDING
+            self._hass.config_entries.async_update_entry(entry, data=data)
+
+        await self._hass.config_entries.async_reload(self._entry_id)
 
 class BoostButton(ButtonEntity):
     """Button that shows Start 24h Boost when off, Stop Boost when on."""
@@ -154,4 +203,10 @@ async def async_setup_entry(
         device_id,
         boost_entity_id,
     )
-    async_add_entities([BoostButton(hass, device_id, boost_entity_id)])
+
+    async_add_entities(
+        [
+            CalaReconnectButton(hass, entry),
+            BoostButton(hass, device_id, boost_entity_id),
+        ]
+    )
