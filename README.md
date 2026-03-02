@@ -2,6 +2,8 @@
 
 Home Assistant custom integration for Cala water heaters.
 
+> **Beta:** This integration requires a beta firmware build on the Cala water heater. To join the beta program, email [beta@calasystems.com](mailto:beta@calasystems.com).
+
 ## Prerequisites
 
 Before starting:
