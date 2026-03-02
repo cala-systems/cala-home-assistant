@@ -20,6 +20,8 @@ If you do not have MQTT installed:
 
 ## Installation
 
+Install the Cala **integration** (the Home Assistant component that connects to your Cala water heater). The physical device is set up separately in the Setup section below.
+
 ### Option A: HACS
 
 1. Install HACS
