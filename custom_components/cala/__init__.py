@@ -121,6 +121,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_timeout = entry_data.get("timeout_timer")
     if callable(cancel_timeout):
         cancel_timeout()
+    cancel_repair = entry_data.get("repair_timer")
+    if callable(cancel_repair):
+        cancel_repair()
+    clear_issue = entry_data.get("repair_issue_clear")
+    if callable(clear_issue):
+        clear_issue()
     if entry.entry_id in (hass.data.get(DOMAIN) or {}):
         del hass.data[DOMAIN][entry.entry_id]
     device_id = entry_data.get(CONF_DEVICE_ID) or entry.data.get(CONF_DEVICE_ID)
