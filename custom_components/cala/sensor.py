@@ -79,12 +79,12 @@ TELEMETRY_FIELDS = {
         "state_class": SensorStateClass.MEASUREMENT,
         "scale": 60,  # device sends kWh used in last min -> kW (kWh/min * 60 = kW)
     },
-    "liters_used": {
+    "liters_used": { # This is the key passed from the ESP32
         "name": "Flow Rate",
         "unit": UnitOfVolumeFlowRate.GALLONS_PER_MINUTE,
         "device_class": None,  # flow rate (vol/time), not volume; WATER expects total/total_increasing
         "state_class": SensorStateClass.MEASUREMENT,
-        "scale": 0.264172,  # L/min -> US gal/min
+        "scale": LITERS_TO_GALLONS,  # L/min -> US gal/min
     },
     "delivery_c": {
         "name": "Delivery Temperature",
