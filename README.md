@@ -54,13 +54,14 @@ scp -r cala root@homeassistant.local:/config/custom_components/
 
 ## Setup
 
-1. After restart, Cala should automatically announce itself via local discovery
-2. Go to **Settings** → **Devices & Services**
-3. Click **Add** and complete the setup
+1. **Get the pairing code from your Cala water heater:** On the device display, go to **Settings** → **Advanced** → **Home Assistant**. Note the pairing code shown there.
+2. After Home Assistant restarts, Cala should automatically announce itself via local discovery
+3. Go to **Settings** → **Devices & Services** in Home Assistant
+4. Click **Add** and complete the setup, entering the pairing code when prompted
 
 **Preferred:** Discovery via mDNS/Zeroconf (device advertises itself)
 
-**Fallback:** Manual setup (enter device host/port), then enter provisioning code and MQTT credentials.
+**Fallback:** Manual setup (enter device host/port), then enter the pairing code and MQTT credentials.
 
 ## MQTT Username and Password
 
