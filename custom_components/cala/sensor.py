@@ -83,10 +83,12 @@ TELEMETRY_FIELDS = {
     },
     "liters_used": { # This is the key passed from the ESP32
         "name": "Flow Rate",
-        "unit": UnitOfVolumeFlowRate.GALLONS_PER_MINUTE,
+        "unit_metric": UnitOfVolumeFlowRate.LITERS_PER_MINUTE,
+        "unit_imperial": UnitOfVolumeFlowRate.GALLONS_PER_MINUTE,
         "device_class": None,  # flow rate (vol/time), not volume; WATER expects total/total_increasing
         "state_class": SensorStateClass.MEASUREMENT,
-        "scale": LITERS_TO_GALLONS,  # L/min -> US gal/min
+        "scale_metric": 1,
+        "scale_imperial": LITERS_TO_GALLONS,  # L/min -> US gal/min
     },
     "delivery_c": {
         "name": "Delivery Temperature",
@@ -256,12 +258,16 @@ class CalaConnectionStatus(CalaBase, SensorEntity):
 
 
 class CalaTelemetrySensor(CalaBase, SensorEntity):
-    def __init__(self, device_id: str, device_name: str, key: str, meta: dict[str, Any]) -> None:
+    def __init__(self, device_id: str, device_name: str, key: str, meta: dict[str, Any], is_metric: bool = False) -> None:
         super().__init__(device_id, device_name)
         self._key = key
         self._attr_name = f"{device_name} {meta['name']}"
         self._attr_unique_id = f"cala_{device_id}_{key}"
-        self._attr_native_unit_of_measurement = meta.get("unit")
+        # Support unit-system-aware fields (unit_metric/unit_imperial) alongside static "unit"
+        if "unit_metric" in meta:
+            self._attr_native_unit_of_measurement = meta["unit_metric"] if is_metric else meta["unit_imperial"]
+        else:
+            self._attr_native_unit_of_measurement = meta.get("unit")
         self._attr_device_class = meta.get("device_class")
         self._attr_entity_category = meta.get("entity_category")
         # Most telemetry values are numeric measurements but string fields (fw_version, wifi_ip, wifi_ssid) should not declare a state_class,
@@ -272,9 +278,12 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         else:
             self._attr_state_class = meta.get("state_class")
-        
+
         self._attr_native_value = None
-        self._scale = meta.get("scale", 1)
+        if "scale_metric" in meta:
+            self._scale = meta["scale_metric"] if is_metric else meta["scale_imperial"]
+        else:
+            self._scale = meta.get("scale", 1)
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
         raw = payload.get(self._key)
@@ -463,12 +472,13 @@ class CalaEnergyCumulativeSensor(CalaBase, SensorEntity):
 
 
 class CalaWaterTodaySensor(CalaBase, SensorEntity):
-    def __init__(self, device_id: str, device_name: str, totalizer: CalaTotalizer):
+    def __init__(self, device_id: str, device_name: str, totalizer: CalaTotalizer, is_metric: bool = False):
         super().__init__(device_id, device_name)
         self._totalizer = totalizer
+        self._is_metric = is_metric
         self._attr_name = f"Water Used (Today)"
         self._attr_unique_id = f"cala_{device_id}_water_today"
-        self._attr_native_unit_of_measurement = UnitOfVolume.GALLONS
+        self._attr_native_unit_of_measurement = UnitOfVolume.LITERS if is_metric else UnitOfVolume.GALLONS
         self._attr_device_class = SensorDeviceClass.WATER
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_value = None
@@ -476,19 +486,23 @@ class CalaWaterTodaySensor(CalaBase, SensorEntity):
 
     def update_value(self) -> None:
         raw = self._totalizer.water_today()
-        self._attr_native_value = (
-            round(raw * LITERS_TO_GALLONS, 2) if raw is not None else None
-        )
+        if raw is None:
+            self._attr_native_value = None
+        elif self._is_metric:
+            self._attr_native_value = round(raw, 2)
+        else:
+            self._attr_native_value = round(raw * LITERS_TO_GALLONS, 2)
         self._attr_last_reset = self._totalizer.today_last_reset()
 
 
 class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
-    def __init__(self, device_id: str, device_name: str, totalizer: CalaTotalizer):
+    def __init__(self, device_id: str, device_name: str, totalizer: CalaTotalizer, is_metric: bool = False):
         super().__init__(device_id, device_name)
         self._totalizer = totalizer
+        self._is_metric = is_metric
         self._attr_name = f"Water Used (Total)"
         self._attr_unique_id = f"cala_{device_id}_water_cumulative"
-        self._attr_native_unit_of_measurement = UnitOfVolume.GALLONS
+        self._attr_native_unit_of_measurement = UnitOfVolume.LITERS if is_metric else UnitOfVolume.GALLONS
         self._attr_device_class = SensorDeviceClass.WATER
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_value = None
@@ -504,7 +518,10 @@ class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
                 self._attr_unique_id,
             )
             return
-        self._attr_native_value = round(raw * LITERS_TO_GALLONS, 2)
+        if self._is_metric:
+            self._attr_native_value = round(raw, 2)
+        else:
+            self._attr_native_value = round(raw * LITERS_TO_GALLONS, 2)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
@@ -528,9 +545,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         data = {k: v for k, v in entry.data.items() if k != "_connection_initial_state"}
         hass.config_entries.async_update_entry(entry, data=data)
 
+    is_metric = hass.config.units.is_metric
+
     connection_status = CalaConnectionStatus(device_id, device_name, initial_state)
     sensors: list[SensorEntity] = [
-        CalaTelemetrySensor(device_id, device_name, key, meta)
+        CalaTelemetrySensor(device_id, device_name, key, meta, is_metric)
         for key, meta in TELEMETRY_FIELDS.items()
     ]
     binaries: list[BinarySensorEntity] = [
@@ -543,8 +562,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     totalizer_sensors: list[SensorEntity] = [
         CalaEnergyTodaySensor(device_id, device_name, totalizer),
         CalaEnergyCumulativeSensor(device_id, device_name, totalizer),
-        CalaWaterTodaySensor(device_id, device_name, totalizer),
-        CalaWaterCumulativeSensor(device_id, device_name, totalizer),
+        CalaWaterTodaySensor(device_id, device_name, totalizer, is_metric),
+        CalaWaterCumulativeSensor(device_id, device_name, totalizer, is_metric),
     ]
     all_data_entities = sensors + binaries + totalizer_sensors
 
