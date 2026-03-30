@@ -172,6 +172,15 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         mqtt_username = user_input["mqtt_username"].strip()
         mqtt_password = user_input["mqtt_password"]
 
+        if not host:
+            _LOGGER.warning("Cala provision: device host is empty")
+            return self.async_show_form(
+                step_id="provision",
+                data_schema=self._provision_schema(),
+                errors={"base": "cannot_connect"},
+                description_placeholders={"error_detail": "Device host/IP is empty. Re-discover or use manual setup."},
+            )
+
         data, err = await _http_pair(
             url,
             device_id,
@@ -185,34 +194,44 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         _LOGGER.debug("Provision result err=%s data_type=%s data=%s", err, type(data), data)
 
-        if err is None and isinstance(data, dict) and data:
-            actual_id = (data.get(CONF_DEVICE_ID) or "").strip()
-            if actual_id:
-                await self.async_set_unique_id(actual_id)
-                self._abort_if_unique_id_configured()
-
-            entry_data = {
-                **data,
-                CONF_DEVICE_HOST: host,
-                CONF_DEVICE_PORT: port,
-                "_connection_initial_state": ConnectionStatus.PENDING,
-            }
-
-            # If this provision is happening as part of reauthentication, update existing entry instead of creating a new one
-            reauth_entry = getattr(self, "_reauth_entry", None)
-            if reauth_entry is not None:
-                self.hass.config_entries.async_update_entry(reauth_entry, data=data)
-                await self.hass.config_entries.async_reload(reauth_entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
-
-            return self.async_create_entry(
-                title=f"Cala Device ({data.get(CONF_DEVICE_NAME, device_id)})",
-                data=entry_data,
+        if err is not None:
+            _LOGGER.warning("Cala pairing failed: err=%s, url=%s", err, url)
+            return self.async_show_form(
+                step_id="provision",
+                data_schema=self._provision_schema(),
+                errors={"base": err},
             )
 
-        return self.async_show_form(
-            step_id="provision",
-            data_schema=self._provision_schema(),
+        if not isinstance(data, dict) or not data:
+            _LOGGER.warning("Cala pairing returned empty or invalid data: %s", type(data))
+            return self.async_show_form(
+                step_id="provision",
+                data_schema=self._provision_schema(),
+                errors={"base": "cannot_connect"},
+            )
+
+        actual_id = (data.get(CONF_DEVICE_ID) or "").strip()
+        if actual_id:
+            await self.async_set_unique_id(actual_id)
+            self._abort_if_unique_id_configured()
+
+        entry_data = {
+            **data,
+            CONF_DEVICE_HOST: host,
+            CONF_DEVICE_PORT: port,
+            "_connection_initial_state": ConnectionStatus.PENDING,
+        }
+
+        # If this provision is happening as part of reauthentication, update existing entry instead of creating a new one
+        reauth_entry = getattr(self, "_reauth_entry", None)
+        if reauth_entry is not None:
+            self.hass.config_entries.async_update_entry(reauth_entry, data=data)
+            await self.hass.config_entries.async_reload(reauth_entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
+
+        return self.async_create_entry(
+            title=f"Cala Device ({data.get(CONF_DEVICE_NAME, device_id)})",
+            data=entry_data,
         )
 
     @staticmethod

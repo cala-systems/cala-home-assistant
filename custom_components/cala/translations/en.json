@@ -8,7 +8,8 @@
       "reauth_successful": "Reconnected successfully. The Cala integration has been reloaded."
     },
     "error": {
-      "cannot_connect": "Failed to connect. Please try again.",
+      "cannot_connect": "Could not reach the device. Check the device is on the same network, powered on, and the IP/host is correct. If using manual setup, verify the IP address.",
+      "pairing_rejected": "The device rejected the pairing. Verify the provisioning code matches what is shown on the device screen (Settings → Advanced → Home Assistant).",
       "provisioning_failed": "Provisioning failed. Please try again.",
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
       "invalid_host": "A valid device host or IP address is required.",
