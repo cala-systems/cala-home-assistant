@@ -115,9 +115,10 @@ async def _http_pair(
                 )
                 if not accepted:
                     _LOGGER.warning(
-                        "Cala pairing response not accepted (no accepted/status and no mqtt credentials)"
+                        "Cala pairing response not accepted (no accepted/status and no mqtt credentials). "
+                        "Response keys: %s", list(resp.keys())
                     )
-                    return (None, "cannot_connect")                
+                    return (None, "pairing_rejected")                
                 data = _extract_pairing_fields(device_id, device_name, resp)
                 _LOGGER.debug(
                     "Cala pairing succeeded: device_id=%s, mqtt_username=%s, password=%s, state_topic=%s, command_topic=%s",
