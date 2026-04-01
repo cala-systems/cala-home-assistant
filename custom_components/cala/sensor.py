@@ -545,7 +545,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         data = {k: v for k, v in entry.data.items() if k != "_connection_initial_state"}
         hass.config_entries.async_update_entry(entry, data=data)
 
-    is_metric = hass.config.units.name == "metric"
+    is_metric = hass.config.units.temperature_unit == "°C"
 
     connection_status = CalaConnectionStatus(device_id, device_name, initial_state)
     sensors: list[SensorEntity] = [
