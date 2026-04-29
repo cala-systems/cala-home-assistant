@@ -59,7 +59,7 @@ def _encrypt_payload(payload: dict, pairing_code: str) -> str:
 
 
 async def _http_pair(
-    url: str,
+    urls: list[str] | str,
     device_id: str,
     device_name: str,
     pairing_code: str,
@@ -71,7 +71,17 @@ async def _http_pair(
     """
     POST pairing code and broker info to device; return (entry_data, error_key).
     Uses same payload shape for discovery and manual (ESP URL) flows.
+
+    Accepts either a single URL or a list of candidate URLs. The list is
+    tried in order - useful for trying mDNS hostname first then a cached
+    IP, so a stale-IP discovery still reaches the device. Returns on the
+    first successful pair; if all candidates fail, returns the last
+    error.
     """
+    candidates = [urls] if isinstance(urls, str) else list(urls)
+    if not candidates:
+        return (None, "cannot_connect")
+
     payload = {
         "pairing_code": pairing_code,
         "device_id": device_id,
@@ -83,62 +93,79 @@ async def _http_pair(
         },
     }
     encrypted = _encrypt_payload(payload, pairing_code)
-    body = {"encrypted": encrypted}
+    request_body = {"encrypted": encrypted}
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            timeout = aiohttp.ClientTimeout(
-                total=PAIRING_TIMEOUT_S,
-                sock_connect=PAIRING_SOCK_READ_S,
-                sock_read=PAIRING_SOCK_READ_S,
-            )
-            async with session.post(url, json=body, timeout=timeout) as response:
-                body = await response.text()
-                resp = _safe_json_loads(body)
-                if response.status != 200 or not isinstance(resp, dict):
-                    _LOGGER.warning(
-                        "Cala pairing HTTP response: status=%s, body_type=%s",
-                        response.status,
-                        type(resp).__name__ if resp is not None else "None",
-                    )
-                    return (None, "cannot_connect")
-                # Accepted if device says so, or if it returned MQTT/topic data we can use
-                mqtt_creds = resp.get("mqtt") if isinstance(resp.get("mqtt"), dict) else {}
-                has_creds = bool(
-                    mqtt_creds.get("username") or mqtt_creds.get("password")
-                    or resp.get("state_topic") or resp.get("topics")
-                )
-                accepted = (
-                    resp.get("accepted") is True
-                    or (isinstance(resp.get("status"), str) and resp.get("status", "").lower() == "accepted")
-                    or has_creds
-                )
-                if not accepted:
-                    _LOGGER.warning(
-                        "Cala pairing response not accepted (no accepted/status and no mqtt credentials). "
-                        "Response keys: %s", list(resp.keys())
-                    )
-                    return (None, "pairing_rejected")                
-                data = _extract_pairing_fields(device_id, device_name, resp)
-                _LOGGER.debug(
-                    "Cala pairing succeeded: device_id=%s, mqtt_username=%s, password=%s, state_topic=%s, command_topic=%s",
-                    device_id,
-                    data.get(CONF_MQTT_USERNAME),
-                    _mask_password(data.get(CONF_MQTT_PASSWORD)),
-                    data.get(CONF_STATE_TOPIC),
-                    data.get(CONF_COMMAND_TOPIC),
-                )
-                return (data, None)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        _LOGGER.warning(
-            "Cala pairing HTTP request to %s failed: %s",
+    last_err: str | None = "cannot_connect"
+    for idx, url in enumerate(candidates):
+        _LOGGER.info(
+            "Cala pairing attempt %d/%d to %s",
+            idx + 1,
+            len(candidates),
             url,
-            _format_client_error(e),
         )
-        return (None, "cannot_connect")
-    except Exception:
-        _LOGGER.exception("Unexpected error during Cala HTTP pairing")
-        return (None, "cannot_connect")
+        try:
+            async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(
+                    total=PAIRING_TIMEOUT_S,
+                    sock_connect=PAIRING_SOCK_READ_S,
+                    sock_read=PAIRING_SOCK_READ_S,
+                )
+                async with session.post(url, json=request_body, timeout=timeout) as response:
+                    body = await response.text()
+                    resp = _safe_json_loads(body)
+                    if response.status != 200 or not isinstance(resp, dict):
+                        _LOGGER.warning(
+                            "Cala pairing HTTP response from %s: status=%s, body_type=%s",
+                            url,
+                            response.status,
+                            type(resp).__name__ if resp is not None else "None",
+                        )
+                        last_err = "cannot_connect"
+                        continue
+                    # Accepted if device says so, or if it returned MQTT/topic data we can use
+                    mqtt_creds = resp.get("mqtt") if isinstance(resp.get("mqtt"), dict) else {}
+                    has_creds = bool(
+                        mqtt_creds.get("username") or mqtt_creds.get("password")
+                        or resp.get("state_topic") or resp.get("topics")
+                    )
+                    accepted = (
+                        resp.get("accepted") is True
+                        or (isinstance(resp.get("status"), str) and resp.get("status", "").lower() == "accepted")
+                        or has_creds
+                    )
+                    if not accepted:
+                        _LOGGER.warning(
+                            "Cala pairing response from %s not accepted (no accepted/status and no mqtt credentials). "
+                            "Response keys: %s", url, list(resp.keys())
+                        )
+                        # Device responded with a definitive rejection - don't keep trying
+                        # other URLs (they'd reach the same device and reject the same way).
+                        return (None, "pairing_rejected")
+                    data = _extract_pairing_fields(device_id, device_name, resp)
+                    _LOGGER.debug(
+                        "Cala pairing succeeded via %s: device_id=%s, mqtt_username=%s, password=%s, state_topic=%s, command_topic=%s",
+                        url,
+                        device_id,
+                        data.get(CONF_MQTT_USERNAME),
+                        _mask_password(data.get(CONF_MQTT_PASSWORD)),
+                        data.get(CONF_STATE_TOPIC),
+                        data.get(CONF_COMMAND_TOPIC),
+                    )
+                    return (data, None)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            _LOGGER.warning(
+                "Cala pairing HTTP request to %s failed: %s",
+                url,
+                _format_client_error(e),
+            )
+            last_err = "cannot_connect"
+            continue
+        except Exception:
+            _LOGGER.exception("Unexpected error during Cala HTTP pairing to %s", url)
+            last_err = "cannot_connect"
+            continue
+
+    return (None, last_err)
 
 def _format_client_error(e: BaseException) -> str:
     """Render aiohttp/asyncio errors with enough detail to diagnose

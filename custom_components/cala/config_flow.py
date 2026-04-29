@@ -106,6 +106,12 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Get host, port, device_id from discovery (support both object and dict-style)
         host = getattr(discovery_info, "host", None) or (discovery_info or {}).get("host", "")
         port = getattr(discovery_info, "port", None) or (discovery_info or {}).get("port", 80)
+        # Hostname is the mDNS/.local name (e.g. "cala-abc123.local."). Preferring
+        # this over the cached IP at pair-time fixes stale-IP failures: if the
+        # router reassigned the device's address between discovery and the user
+        # entering their code, the .local name still resolves.
+        hostname_raw = getattr(discovery_info, "hostname", None) or (discovery_info or {}).get("hostname", "")
+        hostname = (hostname_raw or "").strip().rstrip(".")
         props = getattr(discovery_info, "properties", None) or (discovery_info or {}).get("properties", {}) or {}
         device_id = (props.get("device_id") or props.get("id") or "").strip() or None
 
@@ -122,6 +128,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._discovery_info = discovery_info
         self._discovery_host = host
+        self._discovery_hostname = hostname or None
         self._discovery_port = int(port) if port else 80
         self._discovery_device_id = device_id
 
@@ -158,6 +165,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         host = (getattr(self, "_discovery_host", None) or "").strip()
+        hostname = (getattr(self, "_discovery_hostname", None) or "").strip()
         port = getattr(self, "_discovery_port", 80) or 80
         device_id = getattr(self, "_discovery_device_id", None) or host or "unknown"
         device_name = "Cala Water Heater"
@@ -166,7 +174,15 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         mqtt_broker = (adv.get("mqtt_broker") or "homeassistant.local").strip()
         mqtt_port = adv.get("mqtt_port", 1883)
 
-        url = f"http://{host}:{port}/pair"
+        # Try hostname (mDNS) first, then cached IP. Hostname re-resolves at
+        # connect time, so it survives the device getting a new IP between
+        # discovery and the user submitting the pairing code.
+        urls: list[str] = []
+        if hostname:
+            urls.append(f"http://{hostname}:{port}/pair")
+        ip_url = f"http://{host}:{port}/pair"
+        if ip_url not in urls:
+            urls.append(ip_url)
 
         provisioning_code = user_input["provisioning_code"].strip()
         mqtt_username = user_input["mqtt_username"].strip()
@@ -182,7 +198,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         data, err = await _http_pair(
-            url,
+            urls,
             device_id,
             device_name,
             provisioning_code,
@@ -195,7 +211,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.debug("Provision result err=%s data_type=%s data=%s", err, type(data), data)
 
         if err is not None:
-            _LOGGER.warning("Cala pairing failed: err=%s, url=%s", err, url)
+            _LOGGER.warning("Cala pairing failed: err=%s, urls=%s", err, urls)
             return self.async_show_form(
                 step_id="provision",
                 data_schema=self._provision_schema(),
