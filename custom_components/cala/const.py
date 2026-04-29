@@ -34,4 +34,5 @@ SERVICE_START_BOOST = "start_boost"
 SERVICE_STOP_BOOST = "stop_boost"
 
 CONF_DEVICE_HOST = "device_host"
+CONF_DEVICE_HOSTNAME = "device_hostname"
 CONF_DEVICE_PORT = "device_port"

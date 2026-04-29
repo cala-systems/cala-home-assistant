@@ -13,6 +13,7 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_ID,
     CONF_DEVICE_HOST,
+    CONF_DEVICE_HOSTNAME,
     CONF_DEVICE_PORT,
     ConnectionStatus,
 )
@@ -43,9 +44,10 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._reauth_entry = entry
 
-        self._discovery_host = (entry.data.get("device_host") or "").strip()
-        self._discovery_port = entry.data.get("device_port") or 80
-        self._discovery_device_id = entry.data.get("device_id")
+        self._discovery_host = (entry.data.get(CONF_DEVICE_HOST) or "").strip()
+        self._discovery_hostname = (entry.data.get(CONF_DEVICE_HOSTNAME) or "").strip() or None
+        self._discovery_port = entry.data.get(CONF_DEVICE_PORT) or 80
+        self._discovery_device_id = entry.data.get(CONF_DEVICE_ID)
 
         # Reuse the existing provision step UX
         return await self.async_step_provision(user_input)
@@ -237,11 +239,18 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_DEVICE_PORT: port,
             "_connection_initial_state": ConnectionStatus.PENDING,
         }
+        if hostname:
+            entry_data[CONF_DEVICE_HOSTNAME] = hostname
 
         # If this provision is happening as part of reauthentication, update existing entry instead of creating a new one
         reauth_entry = getattr(self, "_reauth_entry", None)
         if reauth_entry is not None:
-            self.hass.config_entries.async_update_entry(reauth_entry, data=data)
+            reauth_data = {**reauth_entry.data, **data}
+            reauth_data[CONF_DEVICE_HOST] = host
+            reauth_data[CONF_DEVICE_PORT] = port
+            if hostname:
+                reauth_data[CONF_DEVICE_HOSTNAME] = hostname
+            self.hass.config_entries.async_update_entry(reauth_entry, data=reauth_data)
             await self.hass.config_entries.async_reload(reauth_entry.entry_id)
             return self.async_abort(reason="reauth_successful")
 
