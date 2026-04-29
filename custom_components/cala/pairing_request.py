@@ -131,13 +131,36 @@ async def _http_pair(
                 return (data, None)
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         _LOGGER.warning(
-            "Cala pairing HTTP request failed: %s",
-            type(e).__name__,
+            "Cala pairing HTTP request to %s failed: %s",
+            url,
+            _format_client_error(e),
         )
         return (None, "cannot_connect")
     except Exception:
         _LOGGER.exception("Unexpected error during Cala HTTP pairing")
         return (None, "cannot_connect")
+
+def _format_client_error(e: BaseException) -> str:
+    """Render aiohttp/asyncio errors with enough detail to diagnose
+    pairing failures from a homeowner's HA log: error type, message,
+    underlying OSError errno+strerror (e.g. ECONNREFUSED 111,
+    ETIMEDOUT 110, EHOSTUNREACH 113), and target host:port."""
+    parts = [type(e).__name__]
+    msg = str(e)
+    if msg:
+        parts.append(msg)
+    os_err = getattr(e, "os_error", None)
+    if os_err is not None:
+        parts.append(
+            f"os_error errno={getattr(os_err, 'errno', '?')} "
+            f"strerror={getattr(os_err, 'strerror', '?')!r}"
+        )
+    host = getattr(e, "host", None)
+    port = getattr(e, "port", None)
+    if host or port:
+        parts.append(f"target={host}:{port}")
+    return " | ".join(parts)
+
 
 def _mask_password(pw: str | None) -> str:
     """Return a safe string for logging (e.g. *** or ab***xy)."""
