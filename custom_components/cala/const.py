@@ -32,6 +32,12 @@ LITERS_TO_GALLONS = 0.264172  # US gallons per liter
 
 SERVICE_START_BOOST = "start_boost"
 SERVICE_STOP_BOOST = "stop_boost"
+SERVICE_SET_TOU_RATES = "set_tou_rates"
+
+CONF_TOU_RATES_ENTITY = "tou_rates_entity"
+ATTR_RATES = "rates"
+
+TOU_RATES_HOURS = 24
 
 CONF_DEVICE_HOST = "device_host"
 CONF_DEVICE_PORT = "device_port"

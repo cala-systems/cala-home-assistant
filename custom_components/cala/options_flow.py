@@ -16,6 +16,7 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
     CONF_DEVICE_PORT,
+    CONF_TOU_RATES_ENTITY,
 )
 from .pairing_request import _http_pair
 
@@ -28,6 +29,9 @@ OPTIONS_SCHEMA = vol.Schema(
         ),
         vol.Optional("battery_soc_entity"): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor"])
         ),
     }
 )

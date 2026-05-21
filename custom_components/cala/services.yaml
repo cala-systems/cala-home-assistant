@@ -34,3 +34,27 @@ stop_boost:
       example: "2507xxa006"
       selector:
         text:
+
+set_tou_rates:
+  name: Set TOU rates
+  description: >
+    Push a midnight-anchored 24-element Time-of-Use rate array to a Cala device.
+    Index 0 is the rate for 00:00-01:00 local time, index 23 is 23:00-24:00.
+    For dynamic rates pulled from another HA entity, prefer the
+    `tou_rates_entity` option in the integration's Configure dialog instead of
+    calling this service directly.
+  fields:
+    device_id:
+      name: Device ID
+      description: Cala device ID (e.g. 2507xxa006).
+      required: true
+      example: "2507xxa006"
+      selector:
+        text:
+    rates:
+      name: Hourly rates
+      description: 24 floats in $/kWh, midnight-anchored (hour-of-day).
+      required: true
+      example: "[0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.24, 0.26, 0.25, 0.23, 0.20, 0.18, 0.16, 0.14, 0.13, 0.12, 0.12, 0.11, 0.10]"
+      selector:
+        object:
