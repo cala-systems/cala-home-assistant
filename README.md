@@ -135,6 +135,50 @@ data:
 
 The `binary_sensor.xxx_boost_mode_on` entity reports whether boost is active. Use it in automations or to show boost status on dashboards.
 
+## Time-of-Use Rates
+
+The `cala.set_tou_schedule` service pushes a period-based electricity rate schedule to the device. Rates are absolute **$/kWh**. Any time not covered by a period falls back to the mandatory `defaultRate`.
+
+**Schema rules:**
+
+- `version` must be `1`
+- `defaultRate` must be a positive float ($/kWh)
+- At most **4 seasons**, **4 daySchedules** per season, **8 periods** per daySchedule
+- Season `startDate`/`endDate` are inclusive `MM-DD` strings; a season may wrap the year end (e.g. `11-01` → `02-28`); season ranges must not overlap
+- `days` are lowercase `sun`/`mon`/`tue`/`wed`/`thu`/`fri`/`sat`; a day may not appear in two daySchedules of the same season
+- Periods use minutes since local midnight: `startMin` inclusive, `endMin` exclusive, max `1440`; periods must not overlap and must not cross midnight (split into two periods instead)
+
+**Example:**
+
+```yaml
+service: cala.set_tou_schedule
+data:
+  device_id: your_device_id
+  schedule:
+    version: 1
+    defaultRate: 0.12
+    seasons:
+      - startDate: "06-01"
+        endDate: "09-30"
+        daySchedules:
+          - days: [mon, tue, wed, thu, fri]
+            periods:
+              - startMin: 600 # 10:00
+                endMin: 840 # 14:00
+                rate: 0.32
+```
+
+### Automatic publishing from a rates entity
+
+Instead of calling the service directly, you can point the integration at an entity that exposes an hourly rate forecast (e.g. from [openadr3-ven-hass](https://github.com/cala-systems/openadr3-ven-hass)) via the **TOU rates entity** option in the integration's Configure dialog. The entity must expose a `forecast` attribute: a list of at least 24 `{datetime, value, hour}` entries.
+
+On every state change of that entity (and once at startup), the integration:
+
+1. Rotates the rolling forecast into a midnight-anchored 24-hour rate array
+2. Compresses it into a schedule: the most common rate becomes `defaultRate`, consecutive hours with equal non-default rates merge into periods, wrapped in a single all-year (`01-01` → `12-31`), all-days season
+3. If more than 8 periods result, the 8 rates deviating most from `defaultRate` are kept and the rest are absorbed into `defaultRate` (a warning logs the maximum rate error introduced)
+4. Publishes the schedule to the device, skipping the publish when the schedule is unchanged since the last successful one
+
 ## Solar & Battery Data (Optional)
 
 Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.

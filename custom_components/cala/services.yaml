@@ -35,11 +35,15 @@ stop_boost:
       selector:
         text:
 
-set_tou_rates:
-  name: Set TOU rates
+set_tou_schedule:
+  name: Set TOU schedule
   description: >
-    Push a midnight-anchored 24-element Time-of-Use rate array to a Cala device.
-    Index 0 is the rate for 00:00-01:00 local time, index 23 is 23:00-24:00.
+    Push a period-based Time-of-Use rate schedule to a Cala device. Rates are
+    absolute $/kWh. Times not covered by a period fall back to defaultRate.
+    Bounds: at most 4 seasons, 4 daySchedules per season, 8 periods per
+    daySchedule. Period times are minutes since local midnight (startMin
+    inclusive, endMin exclusive, max 1440); periods must not overlap or cross
+    midnight. Season dates are inclusive MM-DD and may wrap the year end.
     For dynamic rates pulled from another HA entity, prefer the
     `tou_rates_entity` option in the integration's Configure dialog instead of
     calling this service directly.
@@ -51,10 +55,16 @@ set_tou_rates:
       example: "2507xxa006"
       selector:
         text:
-    rates:
-      name: Hourly rates
-      description: 24 floats in $/kWh, midnight-anchored (hour-of-day).
+    schedule:
+      name: Schedule
+      description: >
+        TOU schedule object. `version` must be 1, `defaultRate` ($/kWh) must
+        be positive, day names are lowercase sun/mon/tue/wed/thu/fri/sat.
       required: true
-      example: "[0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.24, 0.26, 0.25, 0.23, 0.20, 0.18, 0.16, 0.14, 0.13, 0.12, 0.12, 0.11, 0.10]"
+      example: >
+        {"version": 1, "defaultRate": 0.12, "seasons": [{"startDate": "06-01",
+        "endDate": "09-30", "daySchedules": [{"days": ["mon", "tue", "wed",
+        "thu", "fri"], "periods": [{"startMin": 600, "endMin": 840,
+        "rate": 0.32}]}]}]}
       selector:
         object:

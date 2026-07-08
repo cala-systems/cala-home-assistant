@@ -8,16 +8,16 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_TOU_RATES_ENTITY,
     DOMAIN,
-    SERVICE_SET_TOU_RATES,
+    SERVICE_SET_TOU_SCHEDULE,
     SERVICE_START_BOOST,
     SERVICE_STOP_BOOST,
 )
 from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
 from .tou_services import (
-    SET_TOU_RATES_SCHEMA,
-    handle_set_tou_rates,
-    publish_tou_rates_from_entity,
+    SET_TOU_SCHEDULE_SCHEMA,
+    handle_set_tou_schedule,
+    publish_tou_schedule_from_entity,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,12 +69,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, SERVICE_START_BOOST, handle_start_boost)
     if not hass.services.has_service(DOMAIN, SERVICE_STOP_BOOST):
         hass.services.async_register(DOMAIN, SERVICE_STOP_BOOST, handle_stop_boost)
-    if not hass.services.has_service(DOMAIN, SERVICE_SET_TOU_RATES):
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_TOU_SCHEDULE):
         hass.services.async_register(
             DOMAIN,
-            SERVICE_SET_TOU_RATES,
-            handle_set_tou_rates,
-            schema=SET_TOU_RATES_SCHEMA,
+            SERVICE_SET_TOU_SCHEDULE,
+            handle_set_tou_schedule,
+            schema=SET_TOU_SCHEDULE_SCHEMA,
         )
 
     # Forward to button.py, number.py, etc.
@@ -132,11 +132,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         @callback
         def _tou_state_changed(event):
-            hass.async_create_task(publish_tou_rates_from_entity(hass, entry))
+            hass.async_create_task(publish_tou_schedule_from_entity(hass, entry))
 
         # Publish once at startup so the device gets the latest rates without
         # having to wait for the next source-entity update.
-        hass.async_create_task(publish_tou_rates_from_entity(hass, entry))
+        hass.async_create_task(publish_tou_schedule_from_entity(hass, entry))
 
         unsub_tou = async_track_state_change_event(
             hass,
