@@ -116,6 +116,10 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not host:
             return self.async_abort(reason="invalid_discovery")
 
+        # Discovery-card title: with many Cala devices on one network the
+        # cards are indistinguishable without the device id.
+        self.context["title_placeholders"] = {"name": device_id or host}
+
         #TODO: What do we need to pass in here?
         if not await _mqtt_available(self.hass):
             return self.async_abort(reason="mqtt_not_configured")

@@ -75,7 +75,8 @@
       "entities": {
         "title": "Entity mappings"
       }
-    }
+    },
+    "flow_title": "Cala {name}"
   },
   "options": {
     "step": {
