@@ -4,10 +4,10 @@ Service `cala.set_tou_schedule` accepts a period-based schedule (seasons →
 daySchedules → periods, falling back to `defaultRate`) for manual /
 automation use.
 
-`publish_tou_schedule_from_entity` reads an upstream entity's `forecast`
-attribute (a list of `{datetime, value, hour}` entries; openadr3-ven-hass
-shape), rotates the next-from-now data into a midnight-anchored 24-element
-array, compresses it into a single all-year schedule, and publishes it.
+`publish_tou_schedule_from_entity` reads an upstream price entity's
+attributes (openadr3-ven-hass, Nord Pool, ENTSO-E, or Tibber shapes; see
+`price_feeds`), normalizes them to a midnight-anchored 24-element array,
+compresses that into a single all-year schedule, and publishes it.
 """
 
 from __future__ import annotations
@@ -31,9 +31,11 @@ from .const import (
     TOU_MAX_DAY_SCHEDULES,
     TOU_MAX_PERIODS,
     TOU_MAX_SEASONS,
+    TOU_RATE_FLOOR,
     TOU_RATES_HOURS,
 )
 from .helpers import get_command_topic, publish_command_and_wait_response
+from .price_feeds import clamp_rates_to_floor, normalize_price_attributes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -212,39 +214,6 @@ async def handle_set_tou_schedule(call: ServiceCall) -> None:
     await _publish_schedule(hass, device_id, schedule)
 
 
-def _rotate_forecast_to_midnight_anchored(
-    forecast: list[dict[str, Any]],
-) -> list[float] | None:
-    """Take an openadr3-shape forecast (rolling-from-now) and return a
-    midnight-anchored 24-element rate array.
-
-    Returns None if the forecast can't cover a full 24 hours.
-    """
-    if not isinstance(forecast, list) or len(forecast) < TOU_RATES_HOURS:
-        return None
-
-    rates: list[float | None] = [None] * TOU_RATES_HOURS
-    for entry in forecast[:TOU_RATES_HOURS]:
-        if not isinstance(entry, dict):
-            return None
-        hour = entry.get("hour")
-        value = entry.get("value")
-        if hour is None or value is None:
-            return None
-        try:
-            hour_i = int(hour) % TOU_RATES_HOURS
-            value_f = float(value)
-        except (TypeError, ValueError):
-            return None
-        rates[hour_i] = value_f
-
-    if any(r is None for r in rates):
-        # 24 forecast entries should cover 24 distinct hours; if they don't,
-        # something is wrong with the source (e.g. half-hour intervals).
-        return None
-    return [float(r) for r in rates]
-
-
 def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
     """Compress a midnight-anchored 24-rate array into a schedule dict.
 
@@ -332,16 +301,26 @@ async def publish_tou_schedule_from_entity(
         )
         return
 
-    forecast = state.attributes.get("forecast")
-    rates = _rotate_forecast_to_midnight_anchored(forecast)
+    rates, source = normalize_price_attributes(state.attributes)
     if rates is None:
         _LOGGER.warning(
-            "Cala TOU: %s forecast attribute is missing or shorter than %d "
-            "entries; not publishing",
+            "Cala TOU: %s has no recognizable price attributes covering %d "
+            "hours (detected source: %s); not publishing",
             entity_id,
             TOU_RATES_HOURS,
+            source or "none",
         )
         return
+
+    rates, clamped = clamp_rates_to_floor(rates, TOU_RATE_FLOOR)
+    if clamped:
+        _LOGGER.warning(
+            "Cala TOU: %s: clamped %d non-positive hourly price(s) to the "
+            "%.3f floor (firmware rejects rates <= 0)",
+            entity_id,
+            clamped,
+            TOU_RATE_FLOOR,
+        )
 
     schedule = _compress_rates_to_schedule(rates)
     if schedule is None:

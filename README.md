@@ -168,16 +168,69 @@ data:
                 rate: 0.32
 ```
 
-### Automatic publishing from a rates entity
+### Automatic publishing from a price-feed entity
 
-Instead of calling the service directly, you can point the integration at an entity that exposes an hourly rate forecast (e.g. from [openadr3-ven-hass](https://github.com/cala-systems/openadr3-ven-hass)) via the **TOU rates entity** option in the integration's Configure dialog. The entity must expose a `forecast` attribute: a list of at least 24 `{datetime, value, hour}` entries.
+Instead of calling the service directly, you can point the integration at a price entity via the **TOU rates entity** option in the integration's Configure dialog. The source format is auto-detected from the entity's attributes:
+
+| Source | Attribute shape |
+| ------ | --------------- |
+| [openadr3-ven-hass](https://github.com/cala-systems/openadr3-ven-hass) | `forecast`: list of 24+ `{datetime, value, hour}` entries |
+| Nord Pool (custom component) | `raw_today`: list of `{start, end, value}` entries (`raw_tomorrow` is ignored) |
+| ENTSO-E (`hass-entso-e`) | `prices_today` (or `prices`): list of `{time, price}` entries |
+| Tibber price sensors | `today`: list of 24 numbers, or a list of `{startsAt, total}` entries |
+
+Sub-hourly entries (e.g. 15-minute Nord Pool prices) are averaged per hour. All 24 hours of the day must be covered or nothing is published.
 
 On every state change of that entity (and once at startup), the integration:
 
-1. Rotates the rolling forecast into a midnight-anchored 24-hour rate array
-2. Compresses it into a schedule: the most common rate becomes `defaultRate`, consecutive hours with equal non-default rates merge into periods, wrapped in a single all-year (`01-01` → `12-31`), all-days season
-3. If more than 8 periods result, the 8 rates deviating most from `defaultRate` are kept and the rest are absorbed into `defaultRate` (a warning logs the maximum rate error introduced)
-4. Publishes the schedule to the device, skipping the publish when the schedule is unchanged since the last successful one
+1. Normalizes the feed into a midnight-anchored 24-hour rate array
+2. Clamps zero or negative prices to a `0.001` floor — the device rejects non-positive rates, and clamping (rather than skipping the hour) preserves the price shape the planner optimizes against; one warning is logged per publish
+3. Compresses it into a schedule: the most common rate becomes `defaultRate`, consecutive hours with equal non-default rates merge into periods, wrapped in a single all-year (`01-01` → `12-31`), all-days season
+4. If more than 8 periods result, the 8 rates deviating most from `defaultRate` are kept and the rest are absorbed into `defaultRate` (a warning logs the maximum rate error introduced)
+5. Publishes the schedule to the device, skipping the publish when the schedule is unchanged since the last successful one
+
+Prices pass through in the feed's own currency and unit — the device normalizes relative to the daily minimum, but the on-screen display currently shows a `$` regardless of source currency.
+
+### Demo price feed (no utility integration needed)
+
+Add this template sensor to `configuration.yaml` and select it as the TOU rates entity; it produces a simple day/night pattern (peak 16:00–21:00):
+
+```yaml
+template:
+  - sensor:
+      - name: "Demo TOU Prices"
+        unique_id: demo_tou_prices
+        state: "{{ now().hour }}"
+        attributes:
+          forecast: >
+            {% set ns = namespace(items=[]) %}
+            {% for i in range(24) %}
+              {% set h = (now().hour + i) % 24 %}
+              {% set rate = 0.32 if 16 <= h < 21 else 0.12 %}
+              {% set ns.items = ns.items + [{'hour': h, 'value': rate}] %}
+            {% endfor %}
+            {{ ns.items }}
+```
+
+The state changes every hour, which re-triggers publishing; dedup keeps the device traffic quiet since the compressed schedule doesn't change.
+
+### Time-of-Use from Schedule helpers
+
+You can also paint your utility's TOU windows directly in Home Assistant's native weekly grid UI:
+
+1. Create a [Schedule helper](https://www.home-assistant.io/integrations/schedule/) (**Settings → Devices & Services → Helpers → Create helper → Schedule**) and paint blocks over your peak hours — e.g. Mon–Fri 16:00–21:00.
+2. Optionally create more Schedule helpers for additional price tiers (e.g. a mid-peak shoulder).
+3. In the Cala integration's Configure dialog, set the **TOU default rate** (your off-peak $/kWh) and map up to three tiers: each tier is a Schedule helper plus its rate.
+4. The device follows along: whenever a helper changes (or once at startup / after saving options), the integration derives a schedule and publishes it.
+
+Derivation rules:
+
+- Tier order is priority: where blocks overlap, tier 1 wins over tier 2 over tier 3 (lower tiers are clipped at minute precision, per weekday)
+- Weekdays that end up with an identical pattern share one daySchedule; everything sits in a single all-year season; uncovered time uses the default rate
+- Device limits still apply (4 daySchedules, 8 periods each). If your grids need more — more than 4 distinct weekday patterns, or more than 8 blocks in a day — nothing is published and a Repair issue explains which helper(s) to simplify
+- An unchanged derived schedule is not republished
+
+Configure either the price-feed entity or the Schedule-helper tiers, not both — if both are set, whichever updates last wins.
 
 ## Solar & Battery Data (Optional)
 

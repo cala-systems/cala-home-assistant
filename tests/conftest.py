@@ -41,6 +41,20 @@ _stub_module("homeassistant.config_entries", ConfigEntry=object)
 _mqtt = _stub_module("homeassistant.components.mqtt")
 _stub_module("homeassistant.components", mqtt=_mqtt)
 
+
+class _IssueSeverity:
+    WARNING = "warning"
+    ERROR = "error"
+
+
+_issue_registry = _stub_module(
+    "homeassistant.helpers.issue_registry",
+    IssueSeverity=_IssueSeverity,
+    async_create_issue=lambda *args, **kwargs: None,
+    async_delete_issue=lambda *args, **kwargs: None,
+)
+_stub_module("homeassistant.helpers", issue_registry=_issue_registry)
+
 if "cala" not in sys.modules:
     _pkg = types.ModuleType("cala")
     _pkg.__path__ = [str(COMPONENT_DIR)]

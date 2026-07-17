@@ -6,21 +6,40 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
 )
 
 from .const import (
-    DOMAIN,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
     CONF_DEVICE_PORT,
+    CONF_TOU_DEFAULT_RATE,
     CONF_TOU_RATES_ENTITY,
+    CONF_TOU_TIER1_ENTITY,
+    CONF_TOU_TIER1_RATE,
+    CONF_TOU_TIER2_ENTITY,
+    CONF_TOU_TIER2_RATE,
+    CONF_TOU_TIER3_ENTITY,
+    CONF_TOU_TIER3_RATE,
 )
 from .pairing_request import _http_pair
 
 _LOGGER = logging.getLogger(__name__)
+
+_RATE_SELECTOR = NumberSelector(
+    NumberSelectorConfig(
+        min=0.001,
+        step="any",
+        mode=NumberSelectorMode.BOX,
+        unit_of_measurement="$/kWh",
+    )
+)
+_SCHEDULE_SELECTOR = EntitySelector(EntitySelectorConfig(domain=["schedule"]))
 
 OPTIONS_SCHEMA = vol.Schema(
     {
@@ -33,6 +52,13 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor"])
         ),
+        vol.Optional(CONF_TOU_DEFAULT_RATE): _RATE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER1_ENTITY): _SCHEDULE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER1_RATE): _RATE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER2_ENTITY): _SCHEDULE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER2_RATE): _RATE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER3_ENTITY): _SCHEDULE_SELECTOR,
+        vol.Optional(CONF_TOU_TIER3_RATE): _RATE_SELECTOR,
     }
 )
 
@@ -41,7 +67,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, battery)"},
+                    {"value": "entities", "label": "Entity mappings (solar, battery, TOU rates)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )

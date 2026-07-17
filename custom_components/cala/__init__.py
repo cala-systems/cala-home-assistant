@@ -11,9 +11,11 @@ from .const import (
     SERVICE_SET_TOU_SCHEDULE,
     SERVICE_START_BOOST,
     SERVICE_STOP_BOOST,
+    TOU_TIER_OPTIONS,
 )
 from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
+from .tou_grid import publish_tou_schedule_from_grid
 from .tou_services import (
     SET_TOU_SCHEDULE_SCHEMA,
     handle_set_tou_schedule,
@@ -145,7 +147,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data[DOMAIN][entry.entry_id]["tou_state_unsub"] = unsub_tou
 
-    if not tracked_entities and not tracked_tou_entities:
+    tracked_grid_entities = []
+    for entity_key, _rate_key in TOU_TIER_OPTIONS:
+        entity_id = _entity_id_from_option(opts.get(entity_key))
+        if entity_id:
+            tracked_grid_entities.append(entity_id)
+
+    if tracked_grid_entities:
+        _LOGGER.info(
+            "Cala TOU grid: tracking %s for changes → publish to cala/%s/command",
+            tracked_grid_entities,
+            device_id,
+        )
+
+        @callback
+        def _grid_state_changed(event):
+            hass.async_create_task(publish_tou_schedule_from_grid(hass, entry))
+
+        # Publish once at startup (also covers options changes, which reload
+        # the entry).
+        hass.async_create_task(publish_tou_schedule_from_grid(hass, entry))
+
+        unsub_grid = async_track_state_change_event(
+            hass,
+            tracked_grid_entities,
+            _grid_state_changed,
+        )
+        hass.data[DOMAIN][entry.entry_id]["tou_grid_unsub"] = unsub_grid
+
+    if not tracked_entities and not tracked_tou_entities and not tracked_grid_entities:
         _LOGGER.info(
             "Cala: no option entities configured (solar/battery/tou); no state listeners registered"
         )
@@ -162,6 +192,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     tou_state_unsub = entry_data.get("tou_state_unsub")
     if callable(tou_state_unsub):
         tou_state_unsub()
+    tou_grid_unsub = entry_data.get("tou_grid_unsub")
+    if callable(tou_grid_unsub):
+        tou_grid_unsub()
     # Unsubscribe from MQTT (sensor subscription)
     mqtt_unsubs = entry_data.get("mqtt_unsubscribes") or []
     if callable(entry_data.get("mqtt_unsubscribe")):
