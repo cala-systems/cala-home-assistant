@@ -236,6 +236,12 @@ How it works:
 
 The card pre-fills from the last successfully published schedule, which the integration remembers per device (from any path — the service, the price feed, or the card itself) and exposes on the diagnostic `sensor.<device>_tou_schedule` entity (`schedule` attribute; state is the publish timestamp). The memory survives restarts via HA state restoration.
 
+#### Price feed takes precedence
+
+If you have configured a **TOU rates entity** (price feed) and it is currently producing a valid schedule, **the price feed owns the device's schedule** and the card renders read-only: a banner names the controlling feed entity, the inputs are disabled, and Save is hidden. To edit manually, remove the price-feed entity in the integration options. The card is the editing surface only when no feed is configured, or the feed is unavailable/unknown/producing no valid schedule (the fallback case). If the feed recovers while the card is open, the card switches to the read-only state on its next update.
+
+The raw `cala.set_tou_schedule` service (Developer Tools / automations) is **not** blocked by an active feed — it is a deliberate developer escape hatch. A manual service call will publish, but the feed will overwrite it on its next tick; the card, being the normal user path, is what enforces feed-wins.
+
 ## Solar & Battery Data (Optional)
 
 Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.

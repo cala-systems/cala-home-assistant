@@ -13,9 +13,20 @@ SCHEDULE = {"version": 1, "defaultRate": 0.12, "seasons": []}
 OTHER = {"version": 1, "defaultRate": 0.3, "seasons": []}
 
 
+class FakeStates:
+    def get(self, entity_id):
+        return None
+
+
 class FakeHass:
     def __init__(self):
         self.data = {}
+        self.states = FakeStates()
+
+
+class FakeEntry:
+    options = {}
+    entry_id = "entry1"
 
 
 class TestStore:
@@ -102,7 +113,9 @@ class FakeRestoredState:
 
 class TestScheduleSensor:
     def _sensor(self, hass):
-        sensor = tou_schedule_sensor.CalaTouScheduleSensor("dev1", "Heater")
+        sensor = tou_schedule_sensor.CalaTouScheduleSensor(
+            FakeEntry(), "dev1", "Heater"
+        )
         sensor.hass = hass
         return sensor
 
@@ -112,6 +125,7 @@ class TestScheduleSensor:
         assert sensor.extra_state_attributes == {
             "cala_tou_device": "dev1",
             "schedule": None,
+            "feed_active_entity": None,
         }
 
     def test_reflects_store(self):

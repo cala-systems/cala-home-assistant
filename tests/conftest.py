@@ -81,7 +81,13 @@ _dispatcher = _stub_module(
 _stub_module(
     "homeassistant.helpers.restore_state", RestoreEntity=_RestoreEntity
 )
-_stub_module("homeassistant.helpers", dispatcher=_dispatcher)
+_event = _stub_module(
+    "homeassistant.helpers.event",
+    async_track_state_change_event=lambda *args, **kwargs: (lambda: None),
+)
+_stub_module(
+    "homeassistant.helpers", dispatcher=_dispatcher, event=_event
+)
 _dt = _stub_module("homeassistant.util.dt", utcnow=_utcnow)
 _stub_module("homeassistant.util", dt=_dt)
 

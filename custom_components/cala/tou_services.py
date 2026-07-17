@@ -281,41 +281,65 @@ def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
     }
 
 
+def configured_feed_entity(entry: ConfigEntry) -> str | None:
+    """The tou_rates_entity from options, normalized to an entity_id string."""
+    entity_id = (entry.options or {}).get(CONF_TOU_RATES_ENTITY)
+    if isinstance(entity_id, dict):
+        entity_id = entity_id.get("entity_id") or entity_id.get("id")
+    return entity_id or None
+
+
+def active_feed_entity(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """The feed entity_id if a configured feed currently owns the schedule.
+
+    A feed is active when it is configured AND yields a valid schedule right
+    now; that is when the price feed wins over manual (card) edits. Returns
+    None otherwise. Diagnostic-only (called on every hass update), so it stays
+    quiet — feed problems are logged by the publish path, not here.
+    """
+    entity_id = configured_feed_entity(entry)
+    if not entity_id:
+        return None
+    if schedule_from_price_feed(hass, entry, quiet=True) is None:
+        return None
+    return entity_id
+
+
 def schedule_from_price_feed(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: ConfigEntry, quiet: bool = False
 ) -> dict[str, Any] | None:
     """Return the schedule the configured feed entity currently yields.
 
     None when no feed entity is configured, its state is unusable, or its
-    attributes don't produce a valid schedule.
+    attributes don't produce a valid schedule. `quiet` suppresses the
+    warning/debug logs for diagnostic callers.
     """
-    opts = entry.options or {}
-    entity_id = opts.get(CONF_TOU_RATES_ENTITY)
-    if isinstance(entity_id, dict):
-        entity_id = entity_id.get("entity_id") or entity_id.get("id")
+    entity_id = configured_feed_entity(entry)
     if not entity_id:
         return None
 
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
-        _LOGGER.debug(
-            "Cala TOU: source entity %s has no usable state", entity_id
-        )
+        if not quiet:
+            _LOGGER.debug(
+                "Cala TOU: source entity %s has no usable state", entity_id
+            )
         return None
 
     rates, source = normalize_price_attributes(state.attributes)
     if rates is None:
-        _LOGGER.warning(
-            "Cala TOU: %s has no recognizable price attributes covering "
-            "%d hours (detected source: %s); not publishing",
-            entity_id,
-            TOU_RATES_HOURS,
-            source or "none",
-        )
+        if not quiet:
+            _LOGGER.warning(
+                "Cala TOU: %s has no recognizable price attributes covering "
+                "%d hours (detected source: %s); not publishing",
+                entity_id,
+                TOU_RATES_HOURS,
+                source or "none",
+            )
         return None
 
     rates, clamped = clamp_rates_to_floor(rates, TOU_RATE_FLOOR)
-    if clamped:
+    if clamped and not quiet:
         _LOGGER.warning(
             "Cala TOU: %s: clamped %d non-positive hourly price(s) to the "
             "%.3f floor (firmware rejects rates <= 0)",
@@ -325,7 +349,7 @@ def schedule_from_price_feed(
         )
 
     schedule = _compress_rates_to_schedule(rates)
-    if schedule is None:
+    if schedule is None and not quiet:
         _LOGGER.warning(
             "Cala TOU: %s rates have no positive values; not publishing",
             entity_id,

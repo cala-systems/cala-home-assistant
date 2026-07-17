@@ -575,7 +575,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             device_id
         ] = boost_binary
 
-    tou_schedule_sensor = CalaTouScheduleSensor(device_id, device_name)
+    tou_schedule_sensor = CalaTouScheduleSensor(entry, device_id, device_name)
 
     async_add_entities(
         [connection_status, tou_schedule_sensor]

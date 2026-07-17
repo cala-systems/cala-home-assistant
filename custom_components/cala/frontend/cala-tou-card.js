@@ -103,6 +103,10 @@ const STYLE = `
   pre { background: var(--secondary-background-color); border-radius: 8px; padding: 10px;
         font-size: 11.5px; overflow: auto; max-height: 280px; }
 
+  .feedbanner { margin: 4px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px;
+                border: 1px solid var(--primary-color); color: var(--primary-text-color);
+                background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
+  .editor.locked { opacity: .55; pointer-events: none; }
   .footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }
   .status { margin-right: auto; font-size: 12.5px; }
   .status.ok { color: var(--success-color, #4caf50); }
@@ -147,11 +151,27 @@ class CalaTouCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._prefilled && this._config) {
+    if (!this._config) return;
+    const feedEntity = this._feedActiveEntity();
+    if (!this._prefilled) {
       this._prefill();
       this._prefilled = true;
+      this._feedEntity = feedEntity;
+      this._render();
+      return;
+    }
+    // Reflect the feed becoming active/inactive while the card is open.
+    if (feedEntity !== this._feedEntity) {
+      this._feedEntity = feedEntity;
       this._render();
     }
+  }
+
+  // The entity_id of a price feed that currently owns the schedule, or null.
+  // When set, the card is read-only (the feed wins over manual edits).
+  _feedActiveEntity() {
+    const entity = this._scheduleEntity();
+    return (entity && entity.attributes.feed_active_entity) || null;
   }
 
   _scheduleEntity() {
@@ -264,10 +284,17 @@ class CalaTouCard extends HTMLElement {
 
   _render() {
     const root = this.shadowRoot;
+    const locked = !!this._feedEntity;
+    const banner = locked
+      ? `<div class="feedbanner">A price feed (<b>${this._feedEntity}</b>) is controlling
+           this schedule. Remove it in the integration options to edit manually.</div>`
+      : "";
     root.innerHTML = `
       <style>${STYLE}</style>
       <ha-card header="Time-of-Use Schedule">
         <div class="content">
+          ${banner}
+          <div class="editor${locked ? " locked" : ""}">
           <div class="sub">Type the schedule exactly as it reads on the rate sheet — one line
             per rule. Hours not covered by any rule use the default rate. The preview is
             read-only; use it to spot-check against the paper.</div>
@@ -301,11 +328,16 @@ class CalaTouCard extends HTMLElement {
             <div id="preview"></div>
             <details><summary>Payload</summary><pre id="payload"></pre></details>
           </div>
-          <div class="footer">
+          </div>
+          ${
+            locked
+              ? ""
+              : `<div class="footer">
             <span class="status" id="status"></span>
             <button class="btn" id="cancel">Cancel</button>
             <button class="btn primary" id="save">Save to device</button>
-          </div>
+          </div>`
+          }
         </div>
       </ha-card>`;
 
@@ -330,11 +362,14 @@ class CalaTouCard extends HTMLElement {
     root.getElementById("addRule").addEventListener("click", () =>
       this._addRuleAfter(state.rules[state.rules.length - 1] || null)
     );
-    root.getElementById("cancel").addEventListener("click", () => this._cancel());
-    root.getElementById("save").addEventListener("click", () => this._save());
+
+    const cancel = root.getElementById("cancel");
+    const save = root.getElementById("save");
+    if (cancel) cancel.addEventListener("click", () => this._cancel());
+    if (save) save.addEventListener("click", () => this._save());
 
     const status = root.getElementById("status");
-    if (this._status) {
+    if (status && this._status) {
       status.textContent = this._status.text;
       status.className = `status ${this._status.kind}`;
     }
