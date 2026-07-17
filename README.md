@@ -214,24 +214,6 @@ template:
 
 The state changes every hour, which re-triggers publishing; dedup keeps the device traffic quiet since the compressed schedule doesn't change.
 
-### Time-of-Use from Schedule helpers
-
-You can also paint your utility's TOU windows directly in Home Assistant's native weekly grid UI:
-
-1. Create a [Schedule helper](https://www.home-assistant.io/integrations/schedule/) (**Settings → Devices & Services → Helpers → Create helper → Schedule**) and paint blocks over your peak hours — e.g. Mon–Fri 16:00–21:00.
-2. Optionally create more Schedule helpers for additional price tiers (e.g. a mid-peak shoulder).
-3. In the Cala integration's Configure dialog, set the **TOU default rate** (your off-peak $/kWh) and map up to three tiers: each tier is a Schedule helper plus its rate.
-4. The device follows along: whenever a helper changes (or once at startup / after saving options), the integration derives a schedule and publishes it.
-
-Derivation rules:
-
-- Tier order is priority: where blocks overlap, tier 1 wins over tier 2 over tier 3 (lower tiers are clipped at minute precision, per weekday)
-- Weekdays that end up with an identical pattern share one daySchedule; everything sits in a single all-year season; uncovered time uses the default rate
-- Device limits still apply (4 daySchedules, 8 periods each). If your grids need more — more than 4 distinct weekday patterns, or more than 8 blocks in a day — nothing is published and a Repair issue explains which helper(s) to simplify
-- An unchanged derived schedule is not republished
-
-If both a price-feed entity and Schedule-helper tiers are configured, **the price feed wins**: grid publishes are suppressed while the feed entity yields a valid schedule. The grid is the fallback — it takes over when the feed entity is unavailable/unknown or stops producing usable prices, and the feed reasserts itself on its next valid update.
-
 ## Solar & Battery Data (Optional)
 
 Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.

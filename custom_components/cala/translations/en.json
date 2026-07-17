@@ -78,12 +78,6 @@
     },
     "flow_title": "Cala {name}"
   },
-  "issues": {
-    "tou_grid_bounds": {
-      "title": "Cala TOU schedule exceeds device limits",
-      "description": "The Time-of-Use schedule derived from your Schedule helpers cannot be sent to the device: {detail}. Reduce the number of distinct blocks or make weekdays share the same pattern."
-    }
-  },
   "options": {
     "step": {
       "init": {
@@ -109,14 +103,7 @@
         "data": {
           "solar_production_entity": "Solar production entity",
           "battery_soc_entity": "Battery state-of-charge entity",
-          "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)",
-          "tou_default_rate": "TOU default rate",
-          "tou_tier1_entity": "TOU tier 1 schedule helper (highest priority)",
-          "tou_tier1_rate": "TOU tier 1 rate",
-          "tou_tier2_entity": "TOU tier 2 schedule helper",
-          "tou_tier2_rate": "TOU tier 2 rate",
-          "tou_tier3_entity": "TOU tier 3 schedule helper",
-          "tou_tier3_rate": "TOU tier 3 rate"
+          "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
         }
       }
     }

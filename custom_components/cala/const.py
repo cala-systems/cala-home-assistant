@@ -35,18 +35,6 @@ SERVICE_STOP_BOOST = "stop_boost"
 SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 
 CONF_TOU_RATES_ENTITY = "tou_rates_entity"
-CONF_TOU_DEFAULT_RATE = "tou_default_rate"
-CONF_TOU_TIER1_ENTITY = "tou_tier1_entity"
-CONF_TOU_TIER1_RATE = "tou_tier1_rate"
-CONF_TOU_TIER2_ENTITY = "tou_tier2_entity"
-CONF_TOU_TIER2_RATE = "tou_tier2_rate"
-CONF_TOU_TIER3_ENTITY = "tou_tier3_entity"
-CONF_TOU_TIER3_RATE = "tou_tier3_rate"
-TOU_TIER_OPTIONS = (
-    (CONF_TOU_TIER1_ENTITY, CONF_TOU_TIER1_RATE),
-    (CONF_TOU_TIER2_ENTITY, CONF_TOU_TIER2_RATE),
-    (CONF_TOU_TIER3_ENTITY, CONF_TOU_TIER3_RATE),
-)
 ATTR_SCHEDULE = "schedule"
 
 TOU_RATES_HOURS = 24

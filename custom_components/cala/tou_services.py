@@ -280,13 +280,12 @@ def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
 
 
 def schedule_from_price_feed(
-    hass: HomeAssistant, entry: ConfigEntry, log_problems: bool = True
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any] | None:
     """Return the schedule the configured feed entity currently yields.
 
     None when no feed entity is configured, its state is unusable, or its
-    attributes don't produce a valid schedule. Also used by the grid path
-    to decide precedence (with log_problems=False).
+    attributes don't produce a valid schedule.
     """
     opts = entry.options or {}
     entity_id = opts.get(CONF_TOU_RATES_ENTITY)
@@ -297,26 +296,24 @@ def schedule_from_price_feed(
 
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
-        if log_problems:
-            _LOGGER.debug(
-                "Cala TOU: source entity %s has no usable state", entity_id
-            )
+        _LOGGER.debug(
+            "Cala TOU: source entity %s has no usable state", entity_id
+        )
         return None
 
     rates, source = normalize_price_attributes(state.attributes)
     if rates is None:
-        if log_problems:
-            _LOGGER.warning(
-                "Cala TOU: %s has no recognizable price attributes covering "
-                "%d hours (detected source: %s); not publishing",
-                entity_id,
-                TOU_RATES_HOURS,
-                source or "none",
-            )
+        _LOGGER.warning(
+            "Cala TOU: %s has no recognizable price attributes covering "
+            "%d hours (detected source: %s); not publishing",
+            entity_id,
+            TOU_RATES_HOURS,
+            source or "none",
+        )
         return None
 
     rates, clamped = clamp_rates_to_floor(rates, TOU_RATE_FLOOR)
-    if clamped and log_problems:
+    if clamped:
         _LOGGER.warning(
             "Cala TOU: %s: clamped %d non-positive hourly price(s) to the "
             "%.3f floor (firmware rejects rates <= 0)",
@@ -326,7 +323,7 @@ def schedule_from_price_feed(
         )
 
     schedule = _compress_rates_to_schedule(rates)
-    if schedule is None and log_problems:
+    if schedule is None:
         _LOGGER.warning(
             "Cala TOU: %s rates have no positive values; not publishing",
             entity_id,
