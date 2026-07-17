@@ -41,6 +41,50 @@ _stub_module("homeassistant.config_entries", ConfigEntry=object)
 _mqtt = _stub_module("homeassistant.components.mqtt")
 _stub_module("homeassistant.components", mqtt=_mqtt)
 
+
+class _EntityCategory:
+    DIAGNOSTIC = "diagnostic"
+
+
+class _Entity:
+    hass = None
+
+    def async_on_remove(self, func):
+        return None
+
+    def async_write_ha_state(self):
+        return None
+
+
+class _RestoreEntity(_Entity):
+    async def async_added_to_hass(self):
+        return None
+
+    async def async_get_last_state(self):
+        return None
+
+
+import datetime as _datetime  # noqa: E402
+
+
+def _utcnow():
+    return _datetime.datetime.now(_datetime.timezone.utc)
+
+
+_stub_module("homeassistant.const", EntityCategory=_EntityCategory)
+_stub_module("homeassistant.components.sensor", SensorEntity=_Entity)
+_dispatcher = _stub_module(
+    "homeassistant.helpers.dispatcher",
+    async_dispatcher_send=lambda *args, **kwargs: None,
+    async_dispatcher_connect=lambda *args, **kwargs: (lambda: None),
+)
+_stub_module(
+    "homeassistant.helpers.restore_state", RestoreEntity=_RestoreEntity
+)
+_stub_module("homeassistant.helpers", dispatcher=_dispatcher)
+_dt = _stub_module("homeassistant.util.dt", utcnow=_utcnow)
+_stub_module("homeassistant.util", dt=_dt)
+
 if "cala" not in sys.modules:
     _pkg = types.ModuleType("cala")
     _pkg.__path__ = [str(COMPONENT_DIR)]

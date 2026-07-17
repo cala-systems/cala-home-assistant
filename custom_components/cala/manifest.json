@@ -6,6 +6,8 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "frontend",
+    "http",
     "mqtt",
     "network"
   ],

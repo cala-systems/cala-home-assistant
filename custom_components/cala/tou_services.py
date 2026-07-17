@@ -36,6 +36,7 @@ from .const import (
 )
 from .helpers import get_command_topic, publish_command_and_wait_response
 from .price_feeds import clamp_rates_to_floor, normalize_price_attributes
+from .tou_store import record_published_schedule
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -201,6 +202,7 @@ async def _publish_schedule(
     await publish_command_and_wait_response(
         hass, command_topic, payload, RESPONSE_TIMEOUT_S
     )
+    record_published_schedule(hass, device_id, schedule)
 
 
 async def handle_set_tou_schedule(call: ServiceCall) -> None:

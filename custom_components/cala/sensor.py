@@ -27,6 +27,7 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import issue_registry as ir
 from .helpers import parse_mqtt_json_payload
+from .tou_schedule_sensor import CalaTouScheduleSensor
 from .const import (
     CONF_COMMAND_TOPIC,
     CONF_DEVICE_ID,
@@ -476,7 +477,7 @@ class CalaWaterTodaySensor(CalaBase, SensorEntity):
         super().__init__(device_id, device_name)
         self._totalizer = totalizer
         self._is_metric = is_metric
-        self._attr_name = f"Water Used (Today)"
+        self._attr_name = "Water Used (Today)"
         self._attr_unique_id = f"cala_{device_id}_water_today"
         self._attr_native_unit_of_measurement = UnitOfVolume.LITERS if is_metric else UnitOfVolume.GALLONS
         self._attr_device_class = SensorDeviceClass.WATER
@@ -500,7 +501,7 @@ class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
         super().__init__(device_id, device_name)
         self._totalizer = totalizer
         self._is_metric = is_metric
-        self._attr_name = f"Water Used (Total)"
+        self._attr_name = "Water Used (Total)"
         self._attr_unique_id = f"cala_{device_id}_water_cumulative"
         self._attr_native_unit_of_measurement = UnitOfVolume.LITERS if is_metric else UnitOfVolume.GALLONS
         self._attr_device_class = SensorDeviceClass.WATER
@@ -574,7 +575,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             device_id
         ] = boost_binary
 
-    async_add_entities([connection_status] + sensors + binaries + totalizer_sensors)
+    tou_schedule_sensor = CalaTouScheduleSensor(device_id, device_name)
+
+    async_add_entities(
+        [connection_status, tou_schedule_sensor]
+        + sensors
+        + binaries
+        + totalizer_sensors
+    )
 
     timeout_timer_handle = None
     repair_timer_handle = None
