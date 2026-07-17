@@ -279,41 +279,44 @@ def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
     }
 
 
-async def publish_tou_schedule_from_entity(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> None:
-    """Read the configured tou_rates_entity, compress, and publish on change."""
-    device_id = entry.data.get(CONF_DEVICE_ID)
-    if not device_id:
-        return
+def schedule_from_price_feed(
+    hass: HomeAssistant, entry: ConfigEntry, log_problems: bool = True
+) -> dict[str, Any] | None:
+    """Return the schedule the configured feed entity currently yields.
 
+    None when no feed entity is configured, its state is unusable, or its
+    attributes don't produce a valid schedule. Also used by the grid path
+    to decide precedence (with log_problems=False).
+    """
     opts = entry.options or {}
     entity_id = opts.get(CONF_TOU_RATES_ENTITY)
     if isinstance(entity_id, dict):
         entity_id = entity_id.get("entity_id") or entity_id.get("id")
     if not entity_id:
-        return
+        return None
 
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
-        _LOGGER.debug(
-            "Cala TOU: source entity %s has no usable state", entity_id
-        )
-        return
+        if log_problems:
+            _LOGGER.debug(
+                "Cala TOU: source entity %s has no usable state", entity_id
+            )
+        return None
 
     rates, source = normalize_price_attributes(state.attributes)
     if rates is None:
-        _LOGGER.warning(
-            "Cala TOU: %s has no recognizable price attributes covering %d "
-            "hours (detected source: %s); not publishing",
-            entity_id,
-            TOU_RATES_HOURS,
-            source or "none",
-        )
-        return
+        if log_problems:
+            _LOGGER.warning(
+                "Cala TOU: %s has no recognizable price attributes covering "
+                "%d hours (detected source: %s); not publishing",
+                entity_id,
+                TOU_RATES_HOURS,
+                source or "none",
+            )
+        return None
 
     rates, clamped = clamp_rates_to_floor(rates, TOU_RATE_FLOOR)
-    if clamped:
+    if clamped and log_problems:
         _LOGGER.warning(
             "Cala TOU: %s: clamped %d non-positive hourly price(s) to the "
             "%.3f floor (firmware rejects rates <= 0)",
@@ -323,11 +326,24 @@ async def publish_tou_schedule_from_entity(
         )
 
     schedule = _compress_rates_to_schedule(rates)
-    if schedule is None:
+    if schedule is None and log_problems:
         _LOGGER.warning(
             "Cala TOU: %s rates have no positive values; not publishing",
             entity_id,
         )
+    return schedule
+
+
+async def publish_tou_schedule_from_entity(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Read the configured tou_rates_entity, compress, and publish on change."""
+    device_id = entry.data.get(CONF_DEVICE_ID)
+    if not device_id:
+        return
+
+    schedule = schedule_from_price_feed(hass, entry)
+    if schedule is None:
         return
 
     entry_data = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
@@ -347,7 +363,5 @@ async def publish_tou_schedule_from_entity(
 
     entry_data["last_tou_schedule"] = schedule
     _LOGGER.info(
-        "Cala TOU: published schedule for %s from %s",
-        device_id,
-        entity_id,
+        "Cala TOU: published schedule for %s from the price feed", device_id
     )

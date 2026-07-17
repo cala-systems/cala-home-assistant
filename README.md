@@ -230,7 +230,7 @@ Derivation rules:
 - Device limits still apply (4 daySchedules, 8 periods each). If your grids need more — more than 4 distinct weekday patterns, or more than 8 blocks in a day — nothing is published and a Repair issue explains which helper(s) to simplify
 - An unchanged derived schedule is not republished
 
-Configure either the price-feed entity or the Schedule-helper tiers, not both — if both are set, whichever updates last wins.
+If both a price-feed entity and Schedule-helper tiers are configured, **the price feed wins**: grid publishes are suppressed while the feed entity yields a valid schedule. The grid is the fallback — it takes over when the feed entity is unavailable/unknown or stops producing usable prices, and the feed reasserts itself on its next valid update.
 
 ## Solar & Battery Data (Optional)
 

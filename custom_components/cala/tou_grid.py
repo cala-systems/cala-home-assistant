@@ -34,7 +34,7 @@ from .const import (
     TOU_MAX_PERIODS,
     TOU_TIER_OPTIONS,
 )
-from .tou_services import DAY_NAMES, _publish_schedule
+from .tou_services import DAY_NAMES, _publish_schedule, schedule_from_price_feed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -227,6 +227,14 @@ async def publish_tou_schedule_from_grid(
         if entity_id and rate:
             tier_config.append((entity_id, float(rate)))
     if not tier_config or not default_rate:
+        return
+
+    # The price feed wins: the grid only publishes while no configured feed
+    # entity yields a valid schedule (so a dead feed falls back to the grid).
+    if schedule_from_price_feed(hass, entry, log_problems=False) is not None:
+        _LOGGER.debug(
+            "Cala TOU grid: price feed is active; suppressing grid publish"
+        )
         return
 
     tiers = []
