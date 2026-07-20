@@ -99,7 +99,12 @@
         }
       },
       "entities": {
-        "title": "Entity mappings"
+        "title": "Entity mappings",
+        "data": {
+          "solar_production_entity": "Solar production entity",
+          "battery_soc_entity": "Battery state-of-charge entity",
+          "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
+        }
       }
     }
   }

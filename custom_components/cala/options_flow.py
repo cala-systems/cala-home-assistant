@@ -11,7 +11,6 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    DOMAIN,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
@@ -41,7 +40,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, battery)"},
+                    {"value": "entities", "label": "Entity mappings (solar, battery, TOU rates)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )

@@ -1,13 +1,18 @@
 import logging
+from pathlib import Path
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
+    CARD_VERSION,
     CONF_DEVICE_ID,
     CONF_TOU_RATES_ENTITY,
     DOMAIN,
+    FRONTEND_URL_BASE,
     SERVICE_SET_TOU_SCHEDULE,
     SERVICE_START_BOOST,
     SERVICE_STOP_BOOST,
@@ -44,12 +49,28 @@ def _entity_id_from_option(value):
     return None
 
 
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the bundled cala-tou-card and auto-load it on every dashboard."""
+    if hass.data[DOMAIN].get("frontend_registered"):
+        return
+    hass.data[DOMAIN]["frontend_registered"] = True
+    frontend_dir = Path(__file__).parent / "frontend"
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), True)]
+    )
+    add_extra_js_url(
+        hass, f"{FRONTEND_URL_BASE}/cala-tou-card.js?v={CARD_VERSION}"
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("CALA MQTT: __init__.py async_setup_entry called")
 
     # Ensure domain storage exists BEFORE forwarding platforms
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
+
+    await _async_register_frontend(hass)
 
     device_id = entry.data.get(CONF_DEVICE_ID, "?")
     opts = entry.options or {}

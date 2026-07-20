@@ -4,10 +4,10 @@ Service `cala.set_tou_schedule` accepts a period-based schedule (seasons →
 daySchedules → periods, falling back to `defaultRate`) for manual /
 automation use.
 
-`publish_tou_schedule_from_entity` reads an upstream entity's `forecast`
-attribute (a list of `{datetime, value, hour}` entries; openadr3-ven-hass
-shape), rotates the next-from-now data into a midnight-anchored 24-element
-array, compresses it into a single all-year schedule, and publishes it.
+`publish_tou_schedule_from_entity` reads an upstream price entity's
+attributes (openadr3-ven-hass, Nord Pool, ENTSO-E, or Tibber shapes; see
+`price_feeds`), normalizes them to a midnight-anchored 24-element array,
+compresses that into a single all-year schedule, and publishes it.
 """
 
 from __future__ import annotations
@@ -31,9 +31,12 @@ from .const import (
     TOU_MAX_DAY_SCHEDULES,
     TOU_MAX_PERIODS,
     TOU_MAX_SEASONS,
+    TOU_RATE_FLOOR,
     TOU_RATES_HOURS,
 )
 from .helpers import get_command_topic, publish_command_and_wait_response
+from .price_feeds import clamp_rates_to_floor, normalize_price_attributes
+from .tou_store import record_published_schedule
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -199,6 +202,7 @@ async def _publish_schedule(
     await publish_command_and_wait_response(
         hass, command_topic, payload, RESPONSE_TIMEOUT_S
     )
+    record_published_schedule(hass, device_id, schedule)
 
 
 async def handle_set_tou_schedule(call: ServiceCall) -> None:
@@ -210,39 +214,6 @@ async def handle_set_tou_schedule(call: ServiceCall) -> None:
         "Cala set_tou_schedule: device_id=%s schedule=%s", device_id, schedule
     )
     await _publish_schedule(hass, device_id, schedule)
-
-
-def _rotate_forecast_to_midnight_anchored(
-    forecast: list[dict[str, Any]],
-) -> list[float] | None:
-    """Take an openadr3-shape forecast (rolling-from-now) and return a
-    midnight-anchored 24-element rate array.
-
-    Returns None if the forecast can't cover a full 24 hours.
-    """
-    if not isinstance(forecast, list) or len(forecast) < TOU_RATES_HOURS:
-        return None
-
-    rates: list[float | None] = [None] * TOU_RATES_HOURS
-    for entry in forecast[:TOU_RATES_HOURS]:
-        if not isinstance(entry, dict):
-            return None
-        hour = entry.get("hour")
-        value = entry.get("value")
-        if hour is None or value is None:
-            return None
-        try:
-            hour_i = int(hour) % TOU_RATES_HOURS
-            value_f = float(value)
-        except (TypeError, ValueError):
-            return None
-        rates[hour_i] = value_f
-
-    if any(r is None for r in rates):
-        # 24 forecast entries should cover 24 distinct hours; if they don't,
-        # something is wrong with the source (e.g. half-hour intervals).
-        return None
-    return [float(r) for r in rates]
 
 
 def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
@@ -310,6 +281,82 @@ def _compress_rates_to_schedule(rates: list[float]) -> dict[str, Any] | None:
     }
 
 
+def configured_feed_entity(entry: ConfigEntry) -> str | None:
+    """The tou_rates_entity from options, normalized to an entity_id string."""
+    entity_id = (entry.options or {}).get(CONF_TOU_RATES_ENTITY)
+    if isinstance(entity_id, dict):
+        entity_id = entity_id.get("entity_id") or entity_id.get("id")
+    return entity_id or None
+
+
+def active_feed_entity(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """The feed entity_id if a configured feed currently owns the schedule.
+
+    A feed is active when it is configured AND yields a valid schedule right
+    now; that is when the price feed wins over manual (card) edits. Returns
+    None otherwise. Diagnostic-only (called on every hass update), so it stays
+    quiet — feed problems are logged by the publish path, not here.
+    """
+    entity_id = configured_feed_entity(entry)
+    if not entity_id:
+        return None
+    if schedule_from_price_feed(hass, entry, quiet=True) is None:
+        return None
+    return entity_id
+
+
+def schedule_from_price_feed(
+    hass: HomeAssistant, entry: ConfigEntry, quiet: bool = False
+) -> dict[str, Any] | None:
+    """Return the schedule the configured feed entity currently yields.
+
+    None when no feed entity is configured, its state is unusable, or its
+    attributes don't produce a valid schedule. `quiet` suppresses the
+    warning/debug logs for diagnostic callers.
+    """
+    entity_id = configured_feed_entity(entry)
+    if not entity_id:
+        return None
+
+    state = hass.states.get(entity_id)
+    if state is None or state.state in ("unknown", "unavailable", ""):
+        if not quiet:
+            _LOGGER.debug(
+                "Cala TOU: source entity %s has no usable state", entity_id
+            )
+        return None
+
+    rates, source = normalize_price_attributes(state.attributes)
+    if rates is None:
+        if not quiet:
+            _LOGGER.warning(
+                "Cala TOU: %s has no recognizable price attributes covering "
+                "%d hours (detected source: %s); not publishing",
+                entity_id,
+                TOU_RATES_HOURS,
+                source or "none",
+            )
+        return None
+
+    rates, clamped = clamp_rates_to_floor(rates, TOU_RATE_FLOOR)
+    if clamped and not quiet:
+        _LOGGER.warning(
+            "Cala TOU: %s: clamped %d non-positive hourly price(s) to the "
+            "%.3f floor (firmware rejects rates <= 0)",
+            entity_id,
+            clamped,
+            TOU_RATE_FLOOR,
+        )
+
+    schedule = _compress_rates_to_schedule(rates)
+    if schedule is None and not quiet:
+        _LOGGER.warning(
+            "Cala TOU: %s rates have no positive values; not publishing",
+            entity_id,
+        )
+    return schedule
+
+
 async def publish_tou_schedule_from_entity(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
@@ -318,37 +365,8 @@ async def publish_tou_schedule_from_entity(
     if not device_id:
         return
 
-    opts = entry.options or {}
-    entity_id = opts.get(CONF_TOU_RATES_ENTITY)
-    if isinstance(entity_id, dict):
-        entity_id = entity_id.get("entity_id") or entity_id.get("id")
-    if not entity_id:
-        return
-
-    state = hass.states.get(entity_id)
-    if state is None or state.state in ("unknown", "unavailable", ""):
-        _LOGGER.debug(
-            "Cala TOU: source entity %s has no usable state", entity_id
-        )
-        return
-
-    forecast = state.attributes.get("forecast")
-    rates = _rotate_forecast_to_midnight_anchored(forecast)
-    if rates is None:
-        _LOGGER.warning(
-            "Cala TOU: %s forecast attribute is missing or shorter than %d "
-            "entries; not publishing",
-            entity_id,
-            TOU_RATES_HOURS,
-        )
-        return
-
-    schedule = _compress_rates_to_schedule(rates)
+    schedule = schedule_from_price_feed(hass, entry)
     if schedule is None:
-        _LOGGER.warning(
-            "Cala TOU: %s rates have no positive values; not publishing",
-            entity_id,
-        )
         return
 
     entry_data = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
@@ -368,7 +386,5 @@ async def publish_tou_schedule_from_entity(
 
     entry_data["last_tou_schedule"] = schedule
     _LOGGER.info(
-        "Cala TOU: published schedule for %s from %s",
-        device_id,
-        entity_id,
+        "Cala TOU: published schedule for %s from the price feed", device_id
     )
