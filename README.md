@@ -214,6 +214,34 @@ template:
 
 The state changes every hour, which re-triggers publishing; dedup keeps the device traffic quiet since the compressed schedule doesn't change.
 
+### Editing the schedule from a dashboard — Cala TOU card
+
+The integration ships a custom Lovelace card with a real editing UI for transcribing a utility rate sheet. **No installation or resource registration is needed** — the integration serves and registers the card automatically. Add it to any dashboard:
+
+```yaml
+type: custom:cala-tou-card
+device_id: your_device_id
+```
+
+*(Screenshot to be added.)*
+
+How it works:
+
+- **Default rate** — every hour not covered by a rule uses this $/kWh value.
+- **Seasons** — optional. Define only the season(s) that differ (e.g. Summer `06-01` to `09-30`); "Rest of year" exists automatically and always covers every other date, including wrap-around, so gaps and date math are impossible.
+- **Rules** — one line per statement on the rate sheet: season, Mon–Sun day chips, from/to times, rate. Time fields accept anything you'd write down (`4:30pm`, `430p`, `16:30`, `9pm`) and normalize on blur; overnight ranges (9:00 PM – 7:00 AM) are fine. Press **Enter** in the rate field to start the next line pre-filled with the same season and days.
+- **Overlaps are warnings, not errors** — where two rules overlap, the earlier rule wins; the affected rows get a ⚠ and the warning box spells out each conflict.
+- **Preview** — read-only per-season bars with a legend show the derived schedule so you can spot-check against the paper before saving.
+- **Save** — the card derives the canonical schedule (rest-of-year expanded to explicit date ranges, overlaps clipped, weekdays with identical patterns grouped), checks the device limits (4 seasons / 4 day patterns / 8 periods) with plain-language messages, and submits via the `cala.set_tou_schedule` service. Success or the device's rejection reason is shown in the card.
+
+The card pre-fills from the last successfully published schedule, which the integration remembers per device (from any path — the service, the price feed, or the card itself) and exposes on the diagnostic `sensor.<device>_tou_schedule` entity (`schedule` attribute; state is the publish timestamp). The memory survives restarts via HA state restoration.
+
+#### Price feed takes precedence
+
+If you have configured a **TOU rates entity** (price feed) and it is currently producing a valid schedule, **the price feed owns the device's schedule** and the card renders read-only: a banner names the controlling feed entity, the inputs are disabled, and Save is hidden. To edit manually, remove the price-feed entity in the integration options. The card is the editing surface only when no feed is configured, or the feed is unavailable/unknown/producing no valid schedule (the fallback case). If the feed recovers while the card is open, the card switches to the read-only state on its next update.
+
+The raw `cala.set_tou_schedule` service (Developer Tools / automations) is **not** blocked by an active feed — it is a deliberate developer escape hatch. A manual service call will publish, but the feed will overwrite it on its next tick; the card, being the normal user path, is what enforces feed-wins.
+
 ## Solar & Battery Data (Optional)
 
 Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.

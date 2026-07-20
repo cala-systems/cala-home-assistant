@@ -37,6 +37,9 @@ SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 CONF_TOU_RATES_ENTITY = "tou_rates_entity"
 ATTR_SCHEDULE = "schedule"
 
+FRONTEND_URL_BASE = "/cala_frontend"
+CARD_VERSION = "1.0.0"  # bump to cache-bust the card after changes
+
 TOU_RATES_HOURS = 24
 TOU_MAX_SEASONS = 4
 TOU_MAX_DAY_SCHEDULES = 4
