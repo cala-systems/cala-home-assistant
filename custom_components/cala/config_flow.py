@@ -116,6 +116,10 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not host:
             return self.async_abort(reason="invalid_discovery")
 
+        # Discovery-card title: with many Cala devices on one network the
+        # cards are indistinguishable without the device id.
+        self.context["title_placeholders"] = {"name": device_id or host}
+
         #TODO: What do we need to pass in here?
         if not await _mqtt_available(self.hass):
             return self.async_abort(reason="mqtt_not_configured")
@@ -131,7 +135,25 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return await self.async_step_provision()
     
-    def _provision_schema(self):
+    async def _default_broker(self):
+        """The broker address pushed to the device during pairing.
+
+        A hardcoded "homeassistant.local" only works on installs that
+        actually advertise that name (custom hostnames and Docker installs
+        don't). HA knows its own LAN address - default to it; the field
+        stays editable for anyone who prefers a hostname.
+        """
+        try:
+            from homeassistant.components.network import async_get_source_ip
+
+            source_ip = await async_get_source_ip(self.hass)
+            if source_ip:
+                return source_ip
+        except Exception:  # noqa: BLE001 - any failure falls through
+            _LOGGER.debug("Could not determine source IP", exc_info=True)
+        return "homeassistant.local"
+
+    def _provision_schema(self, default_broker):
         """Single-step schema with broker/port in a collapsible Advanced section."""
         return vol.Schema(
             {
@@ -141,7 +163,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("advanced"): section(
                     vol.Schema(
                         {
-                            vol.Required("mqtt_broker", default="homeassistant.local"): str,
+                            vol.Required("mqtt_broker", default=default_broker): str,
                             vol.Required("mqtt_port", default=1883): vol.Coerce(int),
                         }
                     ),
@@ -154,7 +176,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             return self.async_show_form(
                 step_id="provision",
-                data_schema=self._provision_schema(),
+                data_schema=self._provision_schema(await self._default_broker()),
             )
 
         host = (getattr(self, "_discovery_host", None) or "").strip()
@@ -163,7 +185,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_name = "Cala Water Heater"
 
         adv = user_input.get("advanced") or {}
-        mqtt_broker = (adv.get("mqtt_broker") or "homeassistant.local").strip()
+        mqtt_broker = (adv.get("mqtt_broker") or await self._default_broker()).strip()
         mqtt_port = adv.get("mqtt_port", 1883)
 
         url = f"http://{host}:{port}/pair"
@@ -176,7 +198,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Cala provision: device host is empty")
             return self.async_show_form(
                 step_id="provision",
-                data_schema=self._provision_schema(),
+                data_schema=self._provision_schema(await self._default_broker()),
                 errors={"base": "cannot_connect"},
                 description_placeholders={"error_detail": "Device host/IP is empty. Re-discover or use manual setup."},
             )
@@ -198,7 +220,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Cala pairing failed: err=%s, url=%s", err, url)
             return self.async_show_form(
                 step_id="provision",
-                data_schema=self._provision_schema(),
+                data_schema=self._provision_schema(await self._default_broker()),
                 errors={"base": err},
             )
 
@@ -206,7 +228,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Cala pairing returned empty or invalid data: %s", type(data))
             return self.async_show_form(
                 step_id="provision",
-                data_schema=self._provision_schema(),
+                data_schema=self._provision_schema(await self._default_broker()),
                 errors={"base": "cannot_connect"},
             )
 
