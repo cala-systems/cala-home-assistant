@@ -25,8 +25,10 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from .helpers import parse_mqtt_json_payload
+from .mqtt_helper import _mqtt_available
 from .tou_schedule_sensor import CalaTouScheduleSensor
 from .const import (
     CONF_COMMAND_TOPIC,
@@ -526,6 +528,15 @@ class CalaWaterCumulativeSensor(CalaBase, SensorEntity):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    # Subscribing before the MQTT client is up raises, which kills the platform
+    # for the lifetime of the run — the entities are created but nothing ever
+    # feeds them, and a restart just re-races. Raising ConfigEntryNotReady
+    # instead lets HA retry setup once MQTT is actually available.
+    if not await _mqtt_available(hass):
+        raise ConfigEntryNotReady(
+            "MQTT client is not available yet; cannot subscribe to Cala topics"
+        )
+
     def _set_entities_available(available: bool) -> None:
         for e in all_data_entities:
             e._attr_available = available
