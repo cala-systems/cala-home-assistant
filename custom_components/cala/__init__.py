@@ -1,12 +1,29 @@
 import logging
+from pathlib import Path
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import CONF_DEVICE_ID, DOMAIN, SERVICE_START_BOOST, SERVICE_STOP_BOOST
+from .const import (
+    CARD_VERSION,
+    CONF_DEVICE_ID,
+    CONF_TOU_RATES_ENTITY,
+    DOMAIN,
+    FRONTEND_URL_BASE,
+    SERVICE_SET_TOU_SCHEDULE,
+    SERVICE_START_BOOST,
+    SERVICE_STOP_BOOST,
+)
 from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
+from .tou_services import (
+    SET_TOU_SCHEDULE_SCHEMA,
+    handle_set_tou_schedule,
+    publish_tou_schedule_from_entity,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,6 +33,9 @@ OPTION_KEYS = (
     "solar_production_entity",
     "battery_soc_entity",
 )
+# Entity keys that, on state change, trigger a TOU re-publish (not the context
+# publish path).
+TOU_OPTION_KEYS = (CONF_TOU_RATES_ENTITY,)
 
 
 def _entity_id_from_option(value):
@@ -29,12 +49,28 @@ def _entity_id_from_option(value):
     return None
 
 
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the bundled cala-tou-card and auto-load it on every dashboard."""
+    if hass.data[DOMAIN].get("frontend_registered"):
+        return
+    hass.data[DOMAIN]["frontend_registered"] = True
+    frontend_dir = Path(__file__).parent / "frontend"
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), True)]
+    )
+    add_extra_js_url(
+        hass, f"{FRONTEND_URL_BASE}/cala-tou-card.js?v={CARD_VERSION}"
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("CALA MQTT: __init__.py async_setup_entry called")
 
     # Ensure domain storage exists BEFORE forwarding platforms
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
+
+    await _async_register_frontend(hass)
 
     device_id = entry.data.get(CONF_DEVICE_ID, "?")
     opts = entry.options or {}
@@ -54,6 +90,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, SERVICE_START_BOOST, handle_start_boost)
     if not hass.services.has_service(DOMAIN, SERVICE_STOP_BOOST):
         hass.services.async_register(DOMAIN, SERVICE_STOP_BOOST, handle_stop_boost)
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_TOU_SCHEDULE):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_TOU_SCHEDULE,
+            handle_set_tou_schedule,
+            schema=SET_TOU_SCHEDULE_SCHEMA,
+        )
 
     # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -65,41 +108,69 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entity_id:
             tracked_entities.append(entity_id)
 
-    if not tracked_entities:
+    tracked_tou_entities = []
+    for key in TOU_OPTION_KEYS:
+        entity_id = _entity_id_from_option(opts.get(key))
+        if entity_id:
+            tracked_tou_entities.append(entity_id)
+
+    if tracked_entities:
         _LOGGER.info(
-            "Cala context: no option entities configured (solar/battery); state listener not registered"
-        )
-        return True
-
-    _LOGGER.info(
-        "Cala context: tracking %s for state changes → publish to cala/%s/context",
-        tracked_entities,
-        device_id,
-    )
-
-    @callback
-    def _state_changed(event):
-        data = event.data
-        entity_id = data["entity_id"]
-        old_state = data.get("old_state")
-        new_state = data.get("new_state")
-
-        _LOGGER.info(
-            "Cala context: state change %s (%s → %s), publishing",
-            entity_id,
-            old_state.state if old_state else None,
-            new_state.state if new_state else None,
+            "Cala context: tracking %s for state changes → publish to cala/%s/context",
+            tracked_entities,
+            device_id,
         )
 
-        hass.async_create_task(publish_context(hass, entry))
+        @callback
+        def _context_state_changed(event):
+            data = event.data
+            entity_id = data["entity_id"]
+            old_state = data.get("old_state")
+            new_state = data.get("new_state")
 
-    unsub = async_track_state_change_event(
-        hass,
-        tracked_entities,
-        _state_changed,
-    )
+            _LOGGER.info(
+                "Cala context: state change %s (%s → %s), publishing",
+                entity_id,
+                old_state.state if old_state else None,
+                new_state.state if new_state else None,
+            )
 
-    hass.data[DOMAIN][entry.entry_id]["state_unsub"] = unsub
+            hass.async_create_task(publish_context(hass, entry))
+
+        unsub = async_track_state_change_event(
+            hass,
+            tracked_entities,
+            _context_state_changed,
+        )
+        hass.data[DOMAIN][entry.entry_id]["state_unsub"] = unsub
+
+    if tracked_tou_entities:
+        _LOGGER.info(
+            "Cala TOU: tracking %s for state changes → publish to cala/%s/command",
+            tracked_tou_entities,
+            device_id,
+        )
+
+        @callback
+        def _tou_state_changed(event):
+            hass.async_create_task(publish_tou_schedule_from_entity(hass, entry))
+
+        # Publish once at startup so the device gets the latest rates without
+        # having to wait for the next source-entity update.
+        hass.async_create_task(publish_tou_schedule_from_entity(hass, entry))
+
+        unsub_tou = async_track_state_change_event(
+            hass,
+            tracked_tou_entities,
+            _tou_state_changed,
+        )
+        hass.data[DOMAIN][entry.entry_id]["tou_state_unsub"] = unsub_tou
+
+    if not tracked_entities and not tracked_tou_entities:
+        _LOGGER.info(
+            "Cala: no option entities configured (solar/battery/tou); no state listeners registered"
+        )
+
     return True
 
 
@@ -109,6 +180,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     state_unsub = entry_data.get("state_unsub")
     if callable(state_unsub):
         state_unsub()
+    tou_state_unsub = entry_data.get("tou_state_unsub")
+    if callable(tou_state_unsub):
+        tou_state_unsub()
     # Unsubscribe from MQTT (sensor subscription)
     mqtt_unsubs = entry_data.get("mqtt_unsubscribes") or []
     if callable(entry_data.get("mqtt_unsubscribe")):

@@ -11,11 +11,11 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    DOMAIN,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
     CONF_DEVICE_PORT,
+    CONF_TOU_RATES_ENTITY,
 )
 from .pairing_request import _http_pair
 
@@ -29,6 +29,9 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional("battery_soc_entity"): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
+        vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor"])
+        ),
     }
 )
 
@@ -37,7 +40,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, battery)"},
+                    {"value": "entities", "label": "Entity mappings (solar, battery, TOU rates)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )
