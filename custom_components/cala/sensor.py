@@ -105,6 +105,16 @@ TELEMETRY_FIELDS = {
         "device_class": SensorDeviceClass.TEMPERATURE,
         "state_class": SensorStateClass.MEASUREMENT,
     },
+    # Rolling average of the daily minimum lower-tank temperature (the device's
+    # proxy for incoming mains temperature). The device omits the key until it
+    # has banked at least one daily sample, so this stays unknown on a freshly
+    # paired unit rather than reporting 0 C.
+    "inlet_c": {
+        "name": "Inlet Temperature",
+        "unit": UnitOfTemperature.CELSIUS,
+        "device_class": SensorDeviceClass.TEMPERATURE,
+        "state_class": SensorStateClass.MEASUREMENT,
+    },
 
     "uptime_sec": {
         "name": "Uptime",
