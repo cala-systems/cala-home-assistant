@@ -172,12 +172,12 @@ data:
 
 Instead of calling the service directly, you can point the integration at a price entity via the **TOU rates entity** option in the integration's Configure dialog. The source format is auto-detected from the entity's attributes:
 
-| Source | Attribute shape |
-| ------ | --------------- |
-| [openadr3-ven-hass](https://github.com/cala-systems/openadr3-ven-hass) | `forecast`: list of 24+ `{datetime, value, hour}` entries |
-| Nord Pool (custom component) | `raw_today`: list of `{start, end, value}` entries (`raw_tomorrow` is ignored) |
-| ENTSO-E (`hass-entso-e`) | `prices_today` (or `prices`): list of `{time, price}` entries |
-| Tibber price sensors | `today`: list of 24 numbers, or a list of `{startsAt, total}` entries |
+| Source                                                                 | Attribute shape                                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [openadr3-ven-hass](https://github.com/cala-systems/openadr3-ven-hass) | `forecast`: list of 24+ `{datetime, value, hour}` entries                      |
+| Nord Pool (custom component)                                           | `raw_today`: list of `{start, end, value}` entries (`raw_tomorrow` is ignored) |
+| ENTSO-E (`hass-entso-e`)                                               | `prices_today` (or `prices`): list of `{time, price}` entries                  |
+| Tibber price sensors                                                   | `today`: list of 24 numbers, or a list of `{startsAt, total}` entries          |
 
 Sub-hourly entries (e.g. 15-minute Nord Pool prices) are averaged per hour. All 24 hours of the day must be covered or nothing is published.
 
@@ -223,7 +223,7 @@ type: custom:cala-tou-card
 device_id: your_device_id
 ```
 
-*(Screenshot to be added.)*
+![TOU Input](images/tou-lovelace.png)
 
 How it works:
 
