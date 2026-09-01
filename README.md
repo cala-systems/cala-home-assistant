@@ -1,6 +1,11 @@
 # Cala (MQTT)
 
-Home Assistant custom integration for Cala water heaters.
+[![Validate](https://github.com/cala-systems/cala-home-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/cala-systems/cala-home-assistant/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/cala-systems/cala-home-assistant?sort=semver)](https://github.com/cala-systems/cala-home-assistant/releases)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![License: MIT](https://img.shields.io/github/license/cala-systems/cala-home-assistant)](LICENSE)
+
+Home Assistant custom integration for Cala heat pump water heaters: local MQTT pairing, live telemetry, boost control, and time-of-use scheduling.
 
 ## Prerequisites
 
@@ -301,3 +306,13 @@ To uninstall:
 1. Remove Cala from **Devices & Services**
 2. Delete `/config/custom_components/cala`
 3. Restart Home Assistant
+
+## Getting help
+
+- **Setup questions and pairing help:** [GitHub Discussions](https://github.com/cala-systems/cala-home-assistant/discussions)
+- **Bugs and feature requests:** [GitHub Issues](https://github.com/cala-systems/cala-home-assistant/issues/new/choose) — the bug template lists the versions and logs that make a report actionable
+- **The water heater itself (hardware, warranty, account):** [calasystems.com](https://calasystems.com)
+
+## Releases
+
+Releases follow [semantic versioning](https://semver.org/) and are published from `v*` tags with auto-generated notes; `custom_components/cala/manifest.json` must carry the same version as the tag (CI enforces it).

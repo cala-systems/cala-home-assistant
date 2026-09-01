@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Getting started & questions
+    url: https://github.com/cala-systems/cala-home-assistant/discussions
+    about: Setup help, pairing questions, and sharing dashboards.
+  - name: Cala customer support
+    url: https://calasystems.com
+    about: Hardware, warranty, or account questions about the water heater itself.

@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in the Cala integration is not working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Pairing problems are the most common issue — before filing, please check that the heater is showing **Settings → Advanced → Home Assistant** (the pairing server only runs while that screen is open) and that you used the device ID from the discovered card (e.g. `260121B006`), not the IP address.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead? Include the exact error text shown in Home Assistant.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Settings → Devices & services → Add integration → Cala
+        2. ...
+  - type: input
+    id: integration-version
+    attributes:
+      label: Integration version
+      description: HACS → Cala, or `custom_components/cala/manifest.json`
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: Settings → About
+      placeholder: "2026.8.3"
+    validations:
+      required: true
+  - type: input
+    id: firmware-version
+    attributes:
+      label: Heater firmware version
+      description: Shown on the heater under Settings → About, or in the integration's Firmware sensor
+      placeholder: v8.3.0
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How is the integration installed?
+      options:
+        - HACS
+        - Manual copy
+  - type: dropdown
+    id: network
+    attributes:
+      label: Are Home Assistant and the heater on the same subnet/VLAN?
+      options:
+        - "Yes"
+        - "No (routed between subnets)"
+        - Not sure
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Enable debug logging, reproduce, then paste the relevant lines. Remove passwords and tokens.
+        ```yaml
+        logger:
+          logs:
+            custom_components.cala: debug
+        ```
+      render: text
