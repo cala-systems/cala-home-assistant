@@ -289,10 +289,26 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
             self._attr_state_class = meta.get("state_class")
 
         self._attr_native_value = None
+        self._seen = False
         if "scale_metric" in meta:
             self._scale = meta["scale_metric"] if is_metric else meta["scale_imperial"]
         else:
             self._scale = meta.get("scale", 1)
+
+    @property
+    def available(self) -> bool:
+        """Available once the device has actually sent this field.
+
+        Firmware builds differ in which telemetry fields they publish, and a
+        field that never arrives used to sit at Unknown forever while still
+        reporting itself available -- indistinguishable from a real reading
+        that happens to be missing. Unavailable is the honest state.
+
+        Only the *first* sighting flips this: once a field has been seen, an
+        occasional absent key keeps the last value rather than flapping the
+        entity in and out.
+        """
+        return self._attr_available and self._seen
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
         raw = payload.get(self._key)
@@ -307,6 +323,7 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
                 return
         else:
             self._attr_native_value = coerced
+        self._seen = True
 
 
 class CalaBinarySensor(CalaBase, BinarySensorEntity):
@@ -315,7 +332,13 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
         self._key = key
         self._attr_name = f"{device_name} {name}"
         self._attr_unique_id = f"cala_{device_id}_{key}"
+        self._seen = False
         self._attr_is_on = None
+
+    @property
+    def available(self) -> bool:
+        """See CalaTelemetrySensor.available -- same reasoning."""
+        return self._attr_available and self._seen
 
     def update_from_payload(self, payload: dict[str, Any]) -> None:
         raw = payload.get(self._key)
@@ -323,6 +346,7 @@ class CalaBinarySensor(CalaBase, BinarySensorEntity):
         if coerced is None:
             return
         self._attr_is_on = coerced
+        self._seen = True
 
 
 class CalaTotalizer:
