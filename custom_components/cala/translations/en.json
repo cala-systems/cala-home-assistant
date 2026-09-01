@@ -8,13 +8,17 @@
       "reauth_successful": "Reconnected successfully. The Cala integration has been reloaded."
     },
     "error": {
-      "cannot_connect": "Could not reach the device. Check the device is on the same network, powered on, and the IP/host is correct. If using manual setup, verify the IP address.",
-      "pairing_rejected": "The device rejected the pairing. Verify the provisioning code matches what is shown on the device screen (Settings → Advanced → Home Assistant).",
+      "cannot_connect": "Could not reach the device at {url}: {error_detail}. The pairing server only runs while the heater is showing the Home Assistant screen (Settings → Advanced → Home Assistant) — open that screen, check the IP/host, and try again. Home Assistant and the heater may be on different subnets as long as routing between them is allowed.",
+      "pairing_rejected": "The device answered but did not return pairing credentials ({error_detail}). Make sure the heater is on a firmware version that supports Home Assistant and try again.",
       "provisioning_failed": "Provisioning failed. Please try again.",
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again.",
       "invalid_host": "A valid device host or IP address is required.",
       "invalid_provisioning_code": "Provisioning code is required.",
-      "invalid_mqtt_username": "MQTT username is required."
+      "invalid_mqtt_username": "MQTT username is required.",
+      "invalid_code": "The device could not decrypt the request, which almost always means the pairing code is wrong. Re-read the six-digit code on the heater’s Settings → Advanced → Home Assistant screen and try again. (Device said: {error_detail})",
+      "invalid_device_id": "The pairing code was accepted, but the device rejected the device ID “{device_id}”. Use the exact ID shown on the discovered card or the heater (e.g. 260121B006) — not the IP address. (Device said: {error_detail})",
+      "device_error": "The device returned an unexpected response: {error_detail}",
+      "device_id_required": "A device ID is required. It is the serial shown on the discovered card (e.g. 260121B006)."
     },
     "step": {
       "user": {
@@ -25,10 +29,14 @@
       },
       "manual": {
         "title": "Manual setup",
-        "description": "Enter the Cala device network details.",
+        "description": "Enter the Cala device network details. The device ID is the serial shown on the discovered card and printed on the heater (e.g. 260121B006) — not its IP address.",
         "data": {
           "device_host": "Device host or IP address",
-          "device_port": "Device port"
+          "device_port": "Device port",
+          "device_id": "Device ID"
+        },
+        "data_description": {
+          "device_id": "Serial such as 260121B006. Using the IP address here makes the device reject the pairing."
         }
       },
       "pair": {
@@ -106,6 +114,18 @@
           "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the device at {url}: {error_detail}. The pairing server only runs while the heater is showing the Home Assistant screen (Settings → Advanced → Home Assistant) — open that screen, check the IP/host, and try again. Home Assistant and the heater may be on different subnets as long as routing between them is allowed.",
+      "invalid_code": "The device could not decrypt the request, which almost always means the pairing code is wrong. Re-read the six-digit code on the heater’s Settings → Advanced → Home Assistant screen and try again. (Device said: {error_detail})",
+      "invalid_device_id": "The pairing code was accepted, but the device rejected the device ID “{device_id}”. Use the exact ID shown on the discovered card or the heater (e.g. 260121B006) — not the IP address. (Device said: {error_detail})",
+      "device_error": "The device returned an unexpected response: {error_detail}",
+      "pairing_rejected": "The device answered but did not return pairing credentials ({error_detail}). Make sure the heater is on a firmware version that supports Home Assistant and try again.",
+      "device_id_required": "A device ID is required. It is the serial shown on the discovered card (e.g. 260121B006).",
+      "invalid_host": "A valid device host or IP address is required.",
+      "invalid_provisioning_code": "Provisioning code is required.",
+      "invalid_mqtt_username": "MQTT username is required.",
+      "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
     }
   }
 }

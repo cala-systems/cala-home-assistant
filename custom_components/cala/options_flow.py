@@ -18,6 +18,7 @@ from .const import (
     CONF_TOU_RATES_ENTITY,
 )
 from .pairing_request import _http_pair
+from .pairing_errors import ERROR_DEVICE_ERROR, error_placeholders
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         device_name = self.config_entry.data.get(CONF_DEVICE_NAME) or "Cala Water Heater"
         url = f"http://{host}:{port}/pair"
 
-        data, err = await _http_pair(
+        data, err, detail = await _http_pair(
             url,
             device_id,
             device_name,
@@ -166,10 +167,20 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         )
 
         if err or not data:
+            _LOGGER.warning(
+                "Cala re-provision failed: err=%s detail=%s url=%s device_id=%s",
+                err,
+                detail,
+                url,
+                device_id,
+            )
             return self.async_show_form(
                 step_id="reprovision",
                 data_schema=_reprovision_schema(self.config_entry),
-                errors={"base": "cannot_connect"},
+                errors={"base": err or ERROR_DEVICE_ERROR},
+                description_placeholders=error_placeholders(
+                    url, device_id, detail or "the device returned no pairing data"
+                ),
             )
 
         new_data = {

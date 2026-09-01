@@ -10,6 +10,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 
+from .pairing_errors import (
+    ERROR_CANNOT_CONNECT,
+    ERROR_DEVICE_ERROR,
+    ERROR_PAIRING_REJECTED,
+    classify_exception,
+    classify_http_error,
+)
 from .const import (
     CONF_BROKER_HOST,
     CONF_BROKER_PORT,
@@ -67,9 +74,14 @@ async def _http_pair(
     broker_port: int,
     username: str,
     password: str,
-) -> tuple[dict | None, str | None]:
+) -> tuple[dict | None, str | None, str | None]:
     """
-    POST pairing code and broker info to device; return (entry_data, error_key).
+    POST pairing code and broker info to device.
+
+    Returns (entry_data, error_key, error_detail). On success error_key and
+    error_detail are None. error_key is a translations/*.json error key and
+    error_detail a short human-readable reason for the {error_detail}
+    placeholder (device response text or transport failure).
     Uses same payload shape for discovery and manual (ESP URL) flows.
     """
     payload = {
@@ -93,15 +105,27 @@ async def _http_pair(
                 sock_read=PAIRING_SOCK_READ_S,
             )
             async with session.post(url, json=body, timeout=timeout) as response:
-                body = await response.text()
-                resp = _safe_json_loads(body)
-                if response.status != 200 or not isinstance(resp, dict):
+                body_text = await response.text()
+                if response.status != 200:
+                    # Error bodies are the firmware's short reason strings
+                    # ("Invalid or expired device id", "Decryption failed");
+                    # they never contain credentials.
+                    err, detail = classify_http_error(response.status, body_text)
                     _LOGGER.warning(
-                        "Cala pairing HTTP response: status=%s, body_type=%s",
+                        "Cala pairing rejected by device: url=%s status=%s body=%r -> %s",
+                        url,
                         response.status,
-                        type(resp).__name__ if resp is not None else "None",
+                        body_text[:200],
+                        err,
                     )
-                    return (None, "cannot_connect")
+                    return (None, err, detail)
+                resp = _safe_json_loads(body_text)
+                if not isinstance(resp, dict):
+                    _LOGGER.warning(
+                        "Cala pairing: HTTP 200 but body is not a JSON object (%s)",
+                        type(resp).__name__ if resp is not None else "unparseable",
+                    )
+                    return (None, ERROR_DEVICE_ERROR, "HTTP 200 with a non-JSON body")
                 # Accepted if device says so, or if it returned MQTT/topic data we can use
                 mqtt_creds = resp.get("mqtt") if isinstance(resp.get("mqtt"), dict) else {}
                 has_creds = bool(
@@ -118,7 +142,11 @@ async def _http_pair(
                         "Cala pairing response not accepted (no accepted/status and no mqtt credentials). "
                         "Response keys: %s", list(resp.keys())
                     )
-                    return (None, "pairing_rejected")                
+                    return (
+                        None,
+                        ERROR_PAIRING_REJECTED,
+                        f"response keys: {', '.join(resp.keys()) or 'none'}",
+                    )
                 data = _extract_pairing_fields(device_id, device_name, resp)
                 _LOGGER.debug(
                     "Cala pairing succeeded: device_id=%s, mqtt_username=%s, password=%s, state_topic=%s, command_topic=%s",
@@ -128,16 +156,19 @@ async def _http_pair(
                     data.get(CONF_STATE_TOPIC),
                     data.get(CONF_COMMAND_TOPIC),
                 )
-                return (data, None)
+                return (data, None, None)
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        err, detail = classify_exception(e)
         _LOGGER.warning(
-            "Cala pairing HTTP request failed: %s",
+            "Cala pairing HTTP request to %s failed: %s: %s",
+            url,
             type(e).__name__,
+            e,
         )
-        return (None, "cannot_connect")
-    except Exception:
+        return (None, err, detail)
+    except Exception as e:  # noqa: BLE001
         _LOGGER.exception("Unexpected error during Cala HTTP pairing")
-        return (None, "cannot_connect")
+        return (None, ERROR_CANNOT_CONNECT, f"{type(e).__name__}: {e}")
 
 def _mask_password(pw: str | None) -> str:
     """Return a safe string for logging (e.g. *** or ab***xy)."""
