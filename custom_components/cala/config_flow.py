@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from .pairing_request import _http_pair
+from .pairing_errors import ERROR_CANNOT_CONNECT, ERROR_DEVICE_ERROR, error_placeholders
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import section
@@ -79,7 +80,7 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not host:
                 errors["base"] = "invalid_host"
             elif not device_id:
-                errors["base"] = "invalid_device_id"
+                errors["base"] = "device_id_required"
 
             if errors:
                 return self.async_show_form(
@@ -199,11 +200,15 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="provision",
                 data_schema=self._provision_schema(await self._default_broker()),
-                errors={"base": "cannot_connect"},
-                description_placeholders={"error_detail": "Device host/IP is empty. Re-discover or use manual setup."},
+                errors={"base": ERROR_CANNOT_CONNECT},
+                description_placeholders=error_placeholders(
+                    url,
+                    device_id,
+                    "device host/IP is empty; re-discover or use manual setup",
+                ),
             )
 
-        data, err = await _http_pair(
+        data, err, detail = await _http_pair(
             url,
             device_id,
             device_name,
@@ -217,11 +222,18 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.debug("Provision result err=%s data_type=%s data=%s", err, type(data), data)
 
         if err is not None:
-            _LOGGER.warning("Cala pairing failed: err=%s, url=%s", err, url)
+            _LOGGER.warning(
+                "Cala pairing failed: err=%s detail=%s url=%s device_id=%s",
+                err,
+                detail,
+                url,
+                device_id,
+            )
             return self.async_show_form(
                 step_id="provision",
                 data_schema=self._provision_schema(await self._default_broker()),
                 errors={"base": err},
+                description_placeholders=error_placeholders(url, device_id, detail),
             )
 
         if not isinstance(data, dict) or not data:
@@ -229,7 +241,10 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="provision",
                 data_schema=self._provision_schema(await self._default_broker()),
-                errors={"base": "cannot_connect"},
+                errors={"base": ERROR_DEVICE_ERROR},
+                description_placeholders=error_placeholders(
+                    url, device_id, "the device returned no pairing data"
+                ),
             )
 
         actual_id = (data.get(CONF_DEVICE_ID) or "").strip()
