@@ -105,6 +105,12 @@ TELEMETRY_FIELDS = {
         "device_class": SensorDeviceClass.TEMPERATURE,
         "state_class": SensorStateClass.MEASUREMENT,
     },
+    "inlet_c": {
+        "name": "Inlet Temperature",
+        "unit": UnitOfTemperature.CELSIUS,
+        "device_class": SensorDeviceClass.TEMPERATURE,
+        "state_class": SensorStateClass.MEASUREMENT,
+    },
 
     "uptime_sec": {
         "name": "Uptime",
