@@ -273,7 +273,7 @@ device: 37fec107f24747e9353c5a87a538dee9
 | `device` | auto-detected | Home Assistant device id; what the editor's picker sets |
 | `device_id` | – | The raw Cala device id (e.g. `2507xxa006`). Overrides `device`; only needed when the device has no registry entry |
 
-![TOU Input](images/tou-lovelace.png)
+![TOU Input](docs/tou-lovelace.png)
 
 How it works:
 
