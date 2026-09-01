@@ -135,6 +135,44 @@ data:
 
 The `binary_sensor.xxx_boost_mode_on` entity reports whether boost is active. Use it in automations or to show boost status on dashboards.
 
+## Status Card
+
+The integration ships a Lovelace card that redraws the Cala app's cutaway view from the device's own sensors. **No installation or resource registration is needed** — the integration serves and registers the card automatically. Add it from the dashboard card picker, or by hand:
+
+```yaml
+type: custom:cala-card
+```
+
+![Cala status card in light and dark themes](docs/cala-card.png)
+
+With a single heater that is all you need; the card auto-detects it. With more than one, pick the device in the visual editor, which writes:
+
+```yaml
+type: custom:cala-card
+device: 37fec107f24747e9353c5a87a538dee9
+```
+
+The diagram is live, not a static image:
+
+- Tank fill is interpolated from the top, upper and lower probe temperatures.
+- The fan spins while `fan_on` is on (faster on `fan_speed_high`) and the rings pulse whenever compressor frequency is above zero.
+- Heating elements glow when energised.
+- **BOOST HEAT** presses the 24 h boost button and reads **BOOST ACTIVE** while `boost_mode_on` is on.
+- Callouts open the more-info dialog for their entity; the chart icon toggles a history graph of water available.
+- The status dot turns red and the card dims when the device reports anything other than Connected.
+
+| Option | Default | Notes |
+|---|---|---|
+| `device` | auto-detected | Home Assistant device id; what the editor's picker sets |
+| `prefix` | auto-detected | Entity-ID stem, e.g. `1_car_garage_cala_water_heater`. Use when there is no device-registry entry |
+| `show_history` | `true` | Water-available chart under the button |
+| `history_hours` | `24` | Chart window |
+| `dark_mode` | `auto` | `never` pins the light Cala palette |
+| `entities` | – | Per-key entity overrides |
+| `callouts` | – | Per-slot label/entity overrides; `false` hides a slot |
+
+Entities resolve in this order: explicit `entities` overrides, then `device`, then `prefix`, then auto-detection of the first `sensor.*cala*_top_temperature`.
+
 ## Time-of-Use Rates
 
 The `cala.set_tou_schedule` service pushes a period-based electricity rate schedule to the device. Rates are absolute **$/kWh**. Any time not covered by a period falls back to the mandatory `defaultRate`.

@@ -16,6 +16,7 @@ from .const import (
     SERVICE_SET_TOU_SCHEDULE,
     SERVICE_START_BOOST,
     SERVICE_STOP_BOOST,
+    STATUS_CARD_VERSION,
 )
 from .boost_services import handle_start_boost, handle_stop_boost
 from .publish import publish_context
@@ -50,7 +51,7 @@ def _entity_id_from_option(value):
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Serve the bundled cala-tou-card and auto-load it on every dashboard."""
+    """Serve the bundled Cala cards and auto-load them on every dashboard."""
     if hass.data[DOMAIN].get("frontend_registered"):
         return
     hass.data[DOMAIN]["frontend_registered"] = True
@@ -60,6 +61,9 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     )
     add_extra_js_url(
         hass, f"{FRONTEND_URL_BASE}/cala-tou-card.js?v={CARD_VERSION}"
+    )
+    add_extra_js_url(
+        hass, f"{FRONTEND_URL_BASE}/cala-card.js?v={STATUS_CARD_VERSION}"
     )
 
 
