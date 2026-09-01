@@ -6,7 +6,6 @@ from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components import mqtt
-from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -23,20 +22,22 @@ from homeassistant.const import (
     UnitOfVolumeFlowRate,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
+from .entity import CalaBase
 from .helpers import parse_mqtt_json_payload
 from .mqtt_helper import _mqtt_available
 from .tou_schedule_sensor import CalaTouScheduleSensor
 from .const import (
     CONF_COMMAND_TOPIC,
     CONF_DEVICE_ID,
-    DEVICE_MANUFACTURER,
-    DEVICE_MODEL,
     DOMAIN,
     LITERS_TO_GALLONS,
+    SIGNAL_AVAILABILITY,
+    SIGNAL_PAYLOAD,
     ConnectionStatus,
 )
 
@@ -149,15 +150,6 @@ TELEMETRY_FIELDS = {
 STORAGE_VERSION = 1
 STORAGE_KEY = "cala_totalizer"
 
-BINARY_FIELDS = {
-    "upper_element_on": "Upper Element On",
-    "lower_element_on": "Lower Element On",
-    "boost_mode_on": "Boost Mode On",
-    "fan_on": "Fan On",
-    "fan_speed_high": "Fan Speed High",
-}
-
-
 def _payload_to_str(payload: Any) -> str:
     """Normalize MQTT payload into a string."""
     if payload is None:
@@ -202,22 +194,6 @@ def _coerce_str(value: Any) -> str | None:
     return s if s else None
 
 
-def _coerce_bool(value: Any) -> bool | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in ("true", "t", "yes", "y", "on", "1"):
-            return True
-        if v in ("false", "f", "no", "n", "off", "0"):
-            return False
-    return None
-
-
 def _coerce_telemetry_value(key: str, value: Any) -> Any:
     """Return a safe scalar for HA state, or None to ignore."""
     if key in ("wifi_ip", "wifi_ssid", "fw_version"):
@@ -228,23 +204,6 @@ def _coerce_telemetry_value(key: str, value: Any) -> Any:
         return _coerce_int(value)
     # everything else in TELEMETRY_FIELDS is numeric
     return _coerce_float(value)
-
-
-class CalaBase:
-    def __init__(self, device_id: str, device_name: str) -> None:
-        self._device_id = device_id
-        self._device_name = device_name
-        self._attr_available = True
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "name": self._device_name,
-            "manufacturer": DEVICE_MANUFACTURER,
-            "model": DEVICE_MODEL,
-            "serial_number": self._device_id,
-        }
 
 
 class CalaConnectionStatus(CalaBase, SensorEntity):
@@ -323,29 +282,6 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
                 return
         else:
             self._attr_native_value = coerced
-        self._seen = True
-
-
-class CalaBinarySensor(CalaBase, BinarySensorEntity):
-    def __init__(self, device_id: str, device_name: str, key: str, name: str) -> None:
-        super().__init__(device_id, device_name)
-        self._key = key
-        self._attr_name = f"{device_name} {name}"
-        self._attr_unique_id = f"cala_{device_id}_{key}"
-        self._seen = False
-        self._attr_is_on = None
-
-    @property
-    def available(self) -> bool:
-        """See CalaTelemetrySensor.available -- same reasoning."""
-        return self._attr_available and self._seen
-
-    def update_from_payload(self, payload: dict[str, Any]) -> None:
-        raw = payload.get(self._key)
-        coerced = _coerce_bool(raw)
-        if coerced is None:
-            return
-        self._attr_is_on = coerced
         self._seen = True
 
 
@@ -571,6 +507,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for e in all_data_entities:
             e._attr_available = available
             e.async_write_ha_state()
+        async_dispatcher_send(
+            hass, SIGNAL_AVAILABILITY.format(entry_id=entry.entry_id), available
+        )
 
     device_id = entry.data[CONF_DEVICE_ID]
     device_name = entry.data.get("device_name") or "Cala Water Heater"
@@ -594,10 +533,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CalaTelemetrySensor(device_id, device_name, key, meta, is_metric)
         for key, meta in TELEMETRY_FIELDS.items()
     ]
-    binaries: list[BinarySensorEntity] = [
-        CalaBinarySensor(device_id, device_name, key, name)
-        for key, name in BINARY_FIELDS.items()
-    ]
     totalizer = CalaTotalizer(hass, device_id)
     await totalizer._load()
     totalizer.register_midnight_listener()
@@ -607,21 +542,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CalaWaterTodaySensor(device_id, device_name, totalizer, is_metric),
         CalaWaterCumulativeSensor(device_id, device_name, totalizer, is_metric),
     ]
-    all_data_entities = sensors + binaries + totalizer_sensors
-
-    # Store boost binary sensor for boost_services to update on success
-    boost_binary = next((b for b in binaries if b._key == "boost_mode_on"), None)
-    if boost_binary:
-        hass.data.setdefault(DOMAIN, {}).setdefault("boost_entities", {})[
-            device_id
-        ] = boost_binary
+    all_data_entities = sensors + totalizer_sensors
 
     tou_schedule_sensor = CalaTouScheduleSensor(entry, device_id, device_name)
 
     async_add_entities(
         [connection_status, tou_schedule_sensor]
         + sensors
-        + binaries
         + totalizer_sensors
     )
 
@@ -680,6 +607,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             for e in all_data_entities:
                 e._attr_available = available
                 e.async_write_ha_state()
+            async_dispatcher_send(
+                hass, SIGNAL_AVAILABILITY.format(entry_id=entry.entry_id), available
+            )
         _call_on_loop(_do)
     
     _set_entities_available(connection_status._attr_native_value == ConnectionStatus.CONNECTED.value)
@@ -750,12 +680,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     except Exception:
                         _LOGGER.exception("Error updating sensor %s", getattr(s, "_key", "?"))
 
-                for b in binaries:
-                    try:
-                        b.update_from_payload(payload)
-                        b.async_write_ha_state()
-                    except Exception:
-                        _LOGGER.exception("Error updating binary sensor %s", getattr(b, "_key", "?"))
+                # binary_sensor is its own platform now and listens for this
+                async_dispatcher_send(
+                    hass, SIGNAL_PAYLOAD.format(entry_id=entry.entry_id), payload
+                )
 
                 for t in totalizer_sensors:
                     try:
