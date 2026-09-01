@@ -103,10 +103,16 @@ def get_boost_entity_id(hass, device_id: str) -> str | None:
     """Find the boost_mode_on binary sensor entity_id for a device."""
     ent_reg = async_get_entity_registry(hass)
     unique_id = f"cala_{device_id}_boost_mode_on"
-    for platform in ("sensor", "cala"):
-        entity_id = ent_reg.async_get_entity_id("binary_sensor", platform, unique_id)
-        if entity_id:
-            return entity_id
+    # CalaBinarySensor subclasses BinarySensorEntity but is added from the
+    # *sensor* platform, and HA derives the entity-id domain from the platform
+    # rather than the class -- so this lives at sensor.*_boost_mode_on. Look
+    # there first, keeping binary_sensor for entries registered before that was
+    # understood.
+    for domain in ("sensor", "binary_sensor"):
+        for platform in ("cala", "sensor"):
+            entity_id = ent_reg.async_get_entity_id(domain, platform, unique_id)
+            if entity_id:
+                return entity_id
     dev_reg = async_get_device_registry(hass)
     device = dev_reg.async_get_device(identifiers={(DOMAIN, device_id)})
     if device:
@@ -116,7 +122,7 @@ def get_boost_entity_id(hass, device_id: str) -> str | None:
     device_id_norm = device_id.lower().replace("-", "_")
     for entry in ent_reg.entities.values():
         if (
-            entry.domain == "binary_sensor"
+            entry.domain in ("sensor", "binary_sensor")
             and entry.unique_id
             and entry.unique_id.lower().endswith(BOOST_UNIQUE_ID_SUFFIX)
             and (

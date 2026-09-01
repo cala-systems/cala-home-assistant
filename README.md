@@ -131,7 +131,7 @@ data:
 
 ### Boost Status
 
-The `binary_sensor.xxx_boost_mode_on` entity reports whether boost is active. Use it in automations or to show boost status on dashboards.
+The `sensor.xxx_boost_mode_on` entity reports whether boost is active (`on`/`off`). Use it in automations or to show boost status on dashboards.
 
 ## Status Card
 
