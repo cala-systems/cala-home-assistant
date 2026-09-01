@@ -5,9 +5,11 @@ from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
+    BINARY_FIELDS,
     CARD_VERSION,
     CONF_DEVICE_ID,
     CONF_TOU_RATES_ENTITY,
@@ -28,7 +30,7 @@ from .tou_services import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "button"]
 
 OPTION_KEYS = (
     "solar_production_entity",
@@ -67,6 +69,40 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     )
 
 
+@callback
+def _async_migrate_binary_sensors(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the legacy sensor-domain rows for entities that are now binary sensors.
+
+    These fields were created by the sensor platform, and Home Assistant derives
+    an entity's domain from the platform that adds it, so they registered as
+    ``sensor.*`` despite subclassing BinarySensorEntity. They are now added by
+    the binary_sensor platform and register as ``binary_sensor.*``.
+
+    Registry uniqueness is (domain, platform, unique_id), so the old rows do not
+    block the new ones -- they would simply linger forever as unavailable
+    orphans. Remove them so the migration leaves a clean registry and the new
+    entities are not pushed to ``binary_sensor.x_2`` by a stale name collision.
+
+    This is one-way: entity ids change, and automations or dashboards written
+    against the old ``sensor.*`` ids need updating.
+    """
+    device_id = entry.data.get(CONF_DEVICE_ID)
+    if not device_id:
+        return
+
+    ent_reg = er.async_get(hass)
+    for key in BINARY_FIELDS:
+        unique_id = f"cala_{device_id}_{key}"
+        legacy_entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id)
+        if not legacy_entity_id:
+            continue
+        _LOGGER.info(
+            "Cala: %s is now a binary_sensor; removing the legacy sensor entry",
+            legacy_entity_id,
+        )
+        ent_reg.async_remove(legacy_entity_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("CALA MQTT: __init__.py async_setup_entry called")
 
@@ -101,6 +137,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             handle_set_tou_schedule,
             schema=SET_TOU_SCHEDULE_SCHEMA,
         )
+
+    _async_migrate_binary_sensors(hass, entry)
 
     # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

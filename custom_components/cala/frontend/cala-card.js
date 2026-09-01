@@ -9,7 +9,7 @@
  * Copyright (c) 2026 Matt (@cecilkootz). Licensed under the MIT License.
  */
 
-const CARD_VERSION = "1.1.2";  /* keep in step with STATUS_CARD_VERSION in const.py */
+const CARD_VERSION = "1.2.0";  /* keep in step with STATUS_CARD_VERSION in const.py */
 
 /* sensor key -> entity_id suffix produced by the cala integration */
 const SENSOR_SUFFIX = {
@@ -29,6 +29,11 @@ const SENSOR_SUFFIX = {
   power: "power",
   connection: "connection",
 };
+
+/* Keys served by the binary_sensor platform rather than sensor. */
+const BINARY_KEYS = new Set(["fan", "fan_high", "upper_element", "lower_element", "boost"]);
+
+const domainFor = (k) => (BINARY_KEYS.has(k) ? "binary_sensor." : "sensor.");
 
 /* Tank fill colour by temperature (°F): cool blue -> hot ember */
 const RAMP = [
@@ -431,11 +436,12 @@ class CalaCard extends HTMLElement {
            suffix on every entity. The device filter above already makes the
            stem unambiguous. */
         const stem = stripDedupe(id);
-        if (id.slice(0, 7) === "sensor.") {
+        const dom = id.slice(0, id.indexOf(".") + 1);
+        if (dom === "sensor." || dom === "binary_sensor.") {
           for (const k in SENSOR_SUFFIX) {
-            if (stem.endsWith("_" + SENSOR_SUFFIX[k])) map[k] = id;
+            if (dom === domainFor(k) && stem.endsWith("_" + SENSOR_SUFFIX[k])) map[k] = id;
           }
-        } else if (id.slice(0, 7) === "button." && stem.endsWith("_start_24h_boost")) {
+        } else if (dom === "button." && stem.endsWith("_start_24h_boost")) {
           map.boost_button = id;
         }
       }
@@ -447,7 +453,7 @@ class CalaCard extends HTMLElement {
     if (!map.top && !device) {
       const p = c.prefix;
       if (p) {
-        for (const k in SENSOR_SUFFIX) map[k] = map[k] || "sensor." + p + "_" + SENSOR_SUFFIX[k];
+        for (const k in SENSOR_SUFFIX) map[k] = map[k] || domainFor(k) + p + "_" + SENSOR_SUFFIX[k];
         map.boost_button = map.boost_button || "button." + p + "_start_24h_boost";
       }
     }

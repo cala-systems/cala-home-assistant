@@ -37,9 +37,21 @@ SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 CONF_TOU_RATES_ENTITY = "tou_rates_entity"
 ATTR_SCHEDULE = "schedule"
 
+BINARY_FIELDS = {
+    "upper_element_on": "Upper Element On",
+    "lower_element_on": "Lower Element On",
+    "boost_mode_on": "Boost Mode On",
+    "fan_on": "Fan On",
+    "fan_speed_high": "Fan Speed High",
+}
+
+# The sensor platform owns the MQTT subscription; other platforms listen.
+SIGNAL_PAYLOAD = "cala_payload_{entry_id}"
+SIGNAL_AVAILABILITY = "cala_availability_{entry_id}"
+
 FRONTEND_URL_BASE = "/cala_frontend"
 CARD_VERSION = "1.1.0"  # bump to cache-bust the TOU card after changes
-STATUS_CARD_VERSION = "1.1.2"  # bump to cache-bust the status card after changes
+STATUS_CARD_VERSION = "1.2.0"  # bump to cache-bust the status card after changes
 
 TOU_RATES_HOURS = 24
 TOU_MAX_SEASONS = 4
