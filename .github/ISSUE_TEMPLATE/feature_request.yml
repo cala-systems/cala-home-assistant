@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an entity, service, card, or behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the automation or dashboard you want to build and what is missing today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Entities, services, card options, or behaviour you would like to see.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you have tried
