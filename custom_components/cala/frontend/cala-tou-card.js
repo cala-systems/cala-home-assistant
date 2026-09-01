@@ -2,7 +2,8 @@
  * rule list (see tou_editor.js for all derivation logic). Served by the Cala
  * integration and auto-registered; add with:
  *   type: custom:cala-tou-card
- *   device_id: your_device_id
+ * The water heater is picked in the visual editor (or auto-detected when there
+ * is only one); `device_id:` stays supported as a manual override.
  */
 
 import {
@@ -122,6 +123,131 @@ function blankState() {
   return { defaultRate: "", seasonsEnabled: false, seasons: [], rules: [] };
 }
 
+/* ---------- device resolution ----------
+   The card's config carries an HA device-registry id (`device`, what the
+   picker writes), but `cala.set_tou_schedule` wants the Cala device id. The
+   TOU schedule sensor already carries both — its `cala_tou_device` attribute
+   is the Cala id — so every lookup hops through it. `device_id:` in the
+   config bypasses the hop and is passed to the service verbatim. */
+
+function calaIdForHaDevice(hass, haDeviceId) {
+  if (!hass || !haDeviceId || !hass.entities) return null;
+  for (const id in hass.entities) {
+    if (hass.entities[id].device_id !== haDeviceId) continue;
+    const st = hass.states[id];
+    const cala = st && st.attributes && st.attributes.cala_tou_device;
+    if (cala) return cala;
+  }
+  return null;
+}
+
+function haDeviceForCalaId(hass, calaId) {
+  if (!hass || !calaId || !hass.entities) return null;
+  for (const id in hass.entities) {
+    const st = hass.states[id];
+    if (st && st.attributes && st.attributes.cala_tou_device === calaId) {
+      return hass.entities[id].device_id || null;
+    }
+  }
+  return null;
+}
+
+/* The single Cala device, or null when there are none or several — with more
+   than one unit the pick has to be deliberate. */
+function detectTouDevice(hass) {
+  if (!hass || !hass.states) return null;
+  let found = null;
+  for (const st of Object.values(hass.states)) {
+    const cala = st.attributes && st.attributes.cala_tou_device;
+    if (!cala || cala === found) continue;
+    if (found) return null;
+    found = cala;
+  }
+  return found;
+}
+
+/* ---------- config editor ---------- */
+
+/* ha-form and its selectors only exist once some card editor has pulled them
+   in, so force the built-in entities-card editor to load first. */
+let haFormPromise;
+function loadHaForm() {
+  if (customElements.get("ha-form") && customElements.get("ha-selector")) return Promise.resolve();
+  if (!haFormPromise) {
+    haFormPromise = (async () => {
+      const helpers = window.loadCardHelpers ? await window.loadCardHelpers() : null;
+      if (!helpers) return;
+      const card = await helpers.createCardElement({ type: "entities", entities: [] });
+      if (card && card.constructor && card.constructor.getConfigElement) {
+        await card.constructor.getConfigElement();
+      }
+    })().catch(() => {});
+  }
+  return haFormPromise;
+}
+
+const TOU_EDITOR_SCHEMA = [
+  { name: "device", selector: { device: { integration: "cala" } } },
+  {
+    type: "expandable",
+    name: "",
+    title: "Advanced",
+    icon: "mdi:tune",
+    schema: [{ name: "device_id", selector: { text: {} } }],
+  },
+];
+
+const TOU_EDITOR_LABELS = {
+  device: "Water heater",
+  device_id: "Cala device id",
+};
+
+const TOU_EDITOR_HELPERS = {
+  device: "Pick the Cala device. Leave empty to auto-detect when there is only one.",
+  device_id: "Overrides the picker. Only needed when the device has no registry entry.",
+};
+
+class CalaTouCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (sc) => TOU_EDITOR_LABELS[sc.name] || sc.name;
+      this._form.computeHelper = (sc) => TOU_EDITOR_HELPERS[sc.name] || "";
+      this._form.addEventListener("value-changed", (ev) => this._valueChanged(ev));
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = TOU_EDITOR_SCHEMA;
+    this._form.data = Object.assign({}, this._config);
+  }
+
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    const config = Object.assign({}, this._config, ev.detail.value);
+    for (const k of ["device", "device_id"]) {
+      if (config[k] === "" || config[k] === null || config[k] === undefined) delete config[k];
+    }
+    this.dispatchEvent(
+      new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true })
+    );
+  }
+}
+
+if (!customElements.get("cala-tou-card-editor")) {
+  customElements.define("cala-tou-card-editor", CalaTouCardEditor);
+}
+
 class CalaTouCard extends HTMLElement {
   constructor() {
     super();
@@ -134,15 +260,27 @@ class CalaTouCard extends HTMLElement {
     this._focusAfterRender = null;
   }
 
-  setConfig(config) {
-    if (!config || !config.device_id) {
-      throw new Error("cala-tou-card: device_id is required");
-    }
-    this._config = config;
+  static async getConfigElement() {
+    /* Priming ha-form is best-effort. loadCardHelpers()/createCardElement()
+       can stay pending on some HA builds, and awaiting that unguarded leaves
+       the editor dialog spinning forever, so cap the wait and carry on. */
+    await Promise.race([loadHaForm(), new Promise((r) => setTimeout(r, 2000))]);
+    return document.createElement("cala-tou-card-editor");
   }
 
-  static getStubConfig() {
-    return { device_id: "" };
+  static getStubConfig(hass) {
+    const device = haDeviceForCalaId(hass, detectTouDevice(hass));
+    return device
+      ? { type: "custom:cala-tou-card", device: device }
+      : { type: "custom:cala-tou-card" };
+  }
+
+  /* No device is a renderable state, not a fatal one: the card is added from
+     the picker before anything is chosen, and a single-unit install resolves
+     itself once the device has reported. */
+  setConfig(config) {
+    this._config = config || {};
+    this._prefilled = false;
   }
 
   getCardSize() {
@@ -174,12 +312,23 @@ class CalaTouCard extends HTMLElement {
     return (entity && entity.attributes.feed_active_entity) || null;
   }
 
+  /* The Cala device id the service expects: an explicit override, the picked
+     HA device, or the only unit there is. */
+  _deviceId() {
+    const c = this._config || {};
+    if (c.device_id) return c.device_id;
+    if (c.device) return calaIdForHaDevice(this._hass, c.device);
+    return detectTouDevice(this._hass);
+  }
+
   _scheduleEntity() {
     if (!this._hass) return null;
+    const want = this._deviceId();
+    if (!want) return null;
     for (const state of Object.values(this._hass.states)) {
       if (
         state.entity_id.startsWith("sensor.") &&
-        state.attributes.cala_tou_device === this._config.device_id
+        state.attributes.cala_tou_device === want
       ) {
         return state;
       }
@@ -261,7 +410,7 @@ class CalaTouCard extends HTMLElement {
     }
     try {
       await this._hass.callService("cala", "set_tou_schedule", {
-        device_id: this._config.device_id,
+        device_id: this._deviceId(),
         schedule: derived.schedule,
       });
       this._status = { kind: "ok", text: "Saved — schedule sent to the device." };
@@ -284,6 +433,16 @@ class CalaTouCard extends HTMLElement {
 
   _render() {
     const root = this.shadowRoot;
+    if (!this._deviceId()) {
+      root.innerHTML = `
+      <style>${STYLE}</style>
+      <ha-card header="Time-of-Use Schedule">
+        <div class="content">
+          <div class="sub">No Cala water heater selected. Pick one in the card editor.</div>
+        </div>
+      </ha-card>`;
+      return;
+    }
     const locked = !!this._feedEntity;
     const banner = locked
       ? `<div class="feedbanner">A price feed (<b>${this._feedEntity}</b>) is controlling

@@ -258,8 +258,20 @@ The integration ships a custom Lovelace card with a real editing UI for transcri
 
 ```yaml
 type: custom:cala-tou-card
-device_id: your_device_id
 ```
+
+With a single heater that is all you need; the card auto-detects it. With more than one, pick the
+device in the visual editor, which writes:
+
+```yaml
+type: custom:cala-tou-card
+device: 37fec107f24747e9353c5a87a538dee9
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `device` | auto-detected | Home Assistant device id; what the editor's picker sets |
+| `device_id` | – | The raw Cala device id (e.g. `2507xxa006`). Overrides `device`; only needed when the device has no registry entry |
 
 ![TOU Input](images/tou-lovelace.png)
 
