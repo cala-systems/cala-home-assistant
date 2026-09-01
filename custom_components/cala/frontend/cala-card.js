@@ -3,9 +3,13 @@
  * auto-registered; add with:
  *   type: custom:cala-card
  *   device: <home assistant device id>   # optional; auto-detected when omitted
+ *
+ * Written by Matt (@cecilkootz) and contributed in cala-systems/cala-home-assistant#23;
+ * also published standalone as cecilkootz/homeassistant-cala-card.
+ * Copyright (c) 2026 Matt (@cecilkootz). Licensed under the MIT License.
  */
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.1.2";  /* keep in step with STATUS_CARD_VERSION in const.py */
 
 /* sensor key -> entity_id suffix produced by the cala integration */
 const SENSOR_SUFFIX = {
@@ -84,14 +88,40 @@ const DEFAULT_SLOTS = {
   r6: { key: "bottom",        label: "Bottom Tank", fmt: "temp" },
 };
 
-function detectPrefix(hass) {
+/* HA appends `_2`, `_3`, ... to the entity ids of a second device registered
+   under the same name, so every id below may carry one. */
+const DEDUPE_RE = /_\d+$/;
+const TOP_RE = /^sensor\..*cala.*_top_temperature(?:_\d+)?$/;
+
+function stripDedupe(id) {
+  return id.replace(DEDUPE_RE, "");
+}
+
+/* First Cala top-temperature sensor that is actually reporting; a stale unit
+   is only returned if nothing live is found. */
+function detectTopSensor(hass) {
   if (!hass) return null;
-  const re = /^sensor\.(.*cala.*)_top_temperature$/;
+  let stale = null;
   for (const id in hass.states) {
-    const m = id.match(re);
-    if (m) return m[1];
+    if (!TOP_RE.test(id)) continue;
+    const st = hass.states[id].state;
+    if (st !== "unavailable" && st !== "unknown") return id;
+    if (!stale) stale = id;
   }
-  return null;
+  return stale;
+}
+
+function detectDevice(hass) {
+  const id = detectTopSensor(hass);
+  const entry = id && hass && hass.entities ? hass.entities[id] : null;
+  return entry && entry.device_id ? entry.device_id : null;
+}
+
+/* Entity-ID stem, for installs with no device-registry entry to resolve against. */
+function detectPrefix(hass) {
+  const id = detectTopSensor(hass);
+  const m = id && stripDedupe(id).match(/^sensor\.(.*)_top_temperature$/);
+  return m ? m[1] : null;
 }
 
 function numState(st) {
@@ -322,16 +352,17 @@ svg.chart { display: block; width: 100%; height: auto; margin-top: 6px; }
 
 class CalaCard extends HTMLElement {
   static async getConfigElement() {
-    await loadHaForm();
+    /* Priming ha-form is best-effort. loadCardHelpers()/createCardElement()
+       can stay pending on some HA builds, and awaiting that unguarded leaves
+       the editor dialog spinning forever, so cap the wait and carry on. */
+    await Promise.race([loadHaForm(), new Promise((r) => setTimeout(r, 2000))]);
     return document.createElement("cala-card-editor");
   }
 
   static getStubConfig(hass) {
-    const p = detectPrefix(hass);
-    const reg = hass && hass.entities;
-    const entry = p && reg ? reg["sensor." + p + "_top_temperature"] : null;
-    if (entry && entry.device_id) return { type: "custom:cala-card", device: entry.device_id };
-    return { type: "custom:cala-card", prefix: p || "" };
+    const device = detectDevice(hass);
+    if (device) return { type: "custom:cala-card", device: device };
+    return { type: "custom:cala-card", prefix: detectPrefix(hass) || "" };
   }
 
   constructor() {
@@ -389,25 +420,44 @@ class CalaCard extends HTMLElement {
     const c = this._config;
     const map = {};
 
-    if (c.device && reg) {
+    /* an explicit pick wins; otherwise resolve the device from the entity
+       registry, which keeps a single-unit install zero-config */
+    const device = c.device || (c.prefix ? null : detectDevice(this._hass));
+
+    if (device && reg) {
       for (const id in reg) {
-        if (reg[id].device_id !== c.device) continue;
+        if (reg[id].device_id !== device) continue;
+        /* match the stem, not the raw id: a second unit carries HA's `_2`
+           suffix on every entity. The device filter above already makes the
+           stem unambiguous. */
+        const stem = stripDedupe(id);
         if (id.slice(0, 7) === "sensor.") {
           for (const k in SENSOR_SUFFIX) {
-            if (id.endsWith("_" + SENSOR_SUFFIX[k])) map[k] = id;
+            if (stem.endsWith("_" + SENSOR_SUFFIX[k])) map[k] = id;
           }
-        } else if (id.slice(0, 7) === "button." && id.endsWith("_start_24h_boost")) {
+        } else if (id.slice(0, 7) === "button." && stem.endsWith("_start_24h_boost")) {
           map.boost_button = id;
         }
       }
     }
 
-    if (!map.top) {
-      const p = c.prefix || detectPrefix(this._hass);
+    /* Prefix is the escape hatch for installs with no device-registry entry.
+       Deliberately not reached when a device was picked: falling through
+       there would silently bind the card to whichever heater sorts first. */
+    if (!map.top && !device) {
+      const p = c.prefix;
       if (p) {
         for (const k in SENSOR_SUFFIX) map[k] = map[k] || "sensor." + p + "_" + SENSOR_SUFFIX[k];
         map.boost_button = map.boost_button || "button." + p + "_start_24h_boost";
       }
+    }
+
+    if (!map.top && !c.entities) {
+      console.warn(
+        "cala-card: no Cala entities resolved" +
+          (c.device ? " for device " + c.device : "") +
+          " — the card will render empty"
+      );
     }
 
     const ov = c.entities || {};
