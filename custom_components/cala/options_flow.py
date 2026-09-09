@@ -17,6 +17,7 @@ from .const import (
     CONF_DEVICE_PORT,
     CONF_TOU_RATES_ENTITY,
 )
+from .broker_address import async_default_broker
 from .pairing_request import _http_pair
 from .pairing_errors import ERROR_DEVICE_ERROR, error_placeholders
 
@@ -50,7 +51,7 @@ INIT_SCHEMA = vol.Schema(
 )
 
 
-def _reprovision_schema(entry) -> vol.Schema:
+def _reprovision_schema(entry, default_broker: str) -> vol.Schema:
     data = entry.data
     return vol.Schema(
         {
@@ -70,7 +71,7 @@ def _reprovision_schema(entry) -> vol.Schema:
                     {
                         vol.Required(
                             "mqtt_broker",
-                            default=data.get("broker_host") or "homeassistant.local",
+                            default=data.get("broker_host") or default_broker,
                         ): str,
                         vol.Required(
                             "mqtt_port",
@@ -116,12 +117,18 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             data_schema=data_schema,
         )
 
+    async def _default_broker(self, device_host: str | None = None) -> str:
+        host = device_host or self.config_entry.data.get(CONF_DEVICE_HOST) or ""
+        return await async_default_broker(self.hass, host)
+
     async def async_step_reprovision(self, user_input=None):
         """Re-provision device with new pairing code, broker, or credentials."""
         if user_input is None:
             return self.async_show_form(
                 step_id="reprovision",
-                data_schema=_reprovision_schema(self.config_entry),
+                data_schema=_reprovision_schema(
+                    self.config_entry, await self._default_broker()
+                ),
                 description_placeholders={
                     "device_id": self.config_entry.data.get(CONF_DEVICE_ID, "?"),
                 },
@@ -130,7 +137,7 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         host = (user_input.get(CONF_DEVICE_HOST) or "").strip()
         port = int(user_input.get(CONF_DEVICE_PORT) or 80)
         adv = user_input.get("advanced") or {}
-        mqtt_broker = (adv.get("mqtt_broker") or "homeassistant.local").strip()
+        mqtt_broker = (adv.get("mqtt_broker") or await self._default_broker(host)).strip()
         mqtt_port = int(adv.get("mqtt_port") or 1883)
         provisioning_code = (user_input.get("provisioning_code") or "").strip()
         mqtt_username = (user_input.get("mqtt_username") or "").strip()
@@ -147,7 +154,9 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if errors:
             return self.async_show_form(
                 step_id="reprovision",
-                data_schema=_reprovision_schema(self.config_entry),
+                data_schema=_reprovision_schema(
+                    self.config_entry, await self._default_broker(host)
+                ),
                 errors=errors,
             )
 
@@ -176,7 +185,9 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             )
             return self.async_show_form(
                 step_id="reprovision",
-                data_schema=_reprovision_schema(self.config_entry),
+                data_schema=_reprovision_schema(
+                    self.config_entry, await self._default_broker(host)
+                ),
                 errors={"base": err or ERROR_DEVICE_ERROR},
                 description_placeholders=error_placeholders(
                     url, device_id, detail or "the device returned no pairing data"
