@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from .broker_address import async_default_broker
 from .pairing_request import _http_pair
 from .pairing_errors import ERROR_CANNOT_CONNECT, ERROR_DEVICE_ERROR, error_placeholders
 import voluptuous as vol
@@ -139,20 +140,11 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _default_broker(self):
         """The broker address pushed to the device during pairing.
 
-        A hardcoded "homeassistant.local" only works on installs that
-        actually advertise that name (custom hostnames and Docker installs
-        don't). HA knows its own LAN address - default to it; the field
-        stays editable for anyone who prefers a hostname.
+        Prefers the HA adapter address on the device's own subnet; see
+        broker_address.py for why the source IP alone is not enough.
         """
-        try:
-            from homeassistant.components.network import async_get_source_ip
-
-            source_ip = await async_get_source_ip(self.hass)
-            if source_ip:
-                return source_ip
-        except Exception:  # noqa: BLE001 - any failure falls through
-            _LOGGER.debug("Could not determine source IP", exc_info=True)
-        return "homeassistant.local"
+        device_host = (getattr(self, "_discovery_host", None) or "").strip()
+        return await async_default_broker(self.hass, device_host)
 
     def _provision_schema(self, default_broker):
         """Single-step schema with broker/port in a collapsible Advanced section."""
