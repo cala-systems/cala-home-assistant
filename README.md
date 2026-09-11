@@ -307,6 +307,10 @@ To uninstall:
 2. Delete `/config/custom_components/cala`
 3. Restart Home Assistant
 
+## Local API reference
+
+The MQTT topics and payloads this integration exchanges with the heater, and the HTTP pairing endpoint, are documented as machine-readable specs in [`docs/api/`](docs/api/README.md) (AsyncAPI 3.0 for MQTT, OpenAPI 3.1 for `/pair`). Useful if you want to talk to the heater from something other than Home Assistant.
+
 ## Getting help
 
 - **Setup questions and pairing help:** [GitHub Discussions](https://github.com/cala-systems/cala-home-assistant/discussions)
