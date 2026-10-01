@@ -166,6 +166,8 @@ _event = _stub_module(
     "homeassistant.helpers.event",
     async_track_state_change_event=lambda *args, **kwargs: (lambda: None),
     async_track_time_change=lambda *args, **kwargs: (lambda: None),
+    async_track_time_interval=lambda *args, **kwargs: (lambda: None),
+    async_call_later=lambda *args, **kwargs: (lambda: None),
 )
 _stub_module(
     "homeassistant.helpers",

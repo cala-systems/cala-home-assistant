@@ -65,7 +65,7 @@
       },
       "init": {
         "menu_options": {
-          "entities": "Entity mappings (solar, battery)",
+          "entities": "Entity mappings (solar, grid, battery)",
           "reprovision": "Re-provision device (pairing code, broker, credentials)"
         }
       },
@@ -110,8 +110,22 @@
         "title": "Entity mappings",
         "data": {
           "solar_production_entity": "Solar production entity",
-          "battery_soc_entity": "Battery state-of-charge entity",
+          "grid_power_entity": "Grid power entity (signed, W or kW)",
+          "grid_power_sign": "Grid power sign convention",
+          "grid_import_entity": "Grid import entity (W or kW; use with grid export instead of a signed grid entity)",
+          "grid_export_entity": "Grid export entity (W or kW)",
+          "grid_status_entity": "Grid status entity (on-grid / off-grid)",
+          "grid_status_invert": "Invert grid status (entity is on during an outage)",
+          "battery_soc_entity": "Battery state-of-charge entity (0–100 %)",
+          "battery_power_entity": "Battery power entity (signed, W or kW)",
+          "battery_power_sign": "Battery power sign convention",
+          "context_publish_interval_s": "Solar/grid/battery publish interval",
           "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
+        },
+        "data_description": {
+          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair.",
+          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded.",
+          "context_publish_interval_s": "How often the readings are re-sent to the heater even when nothing changes. Changes are also sent as they happen, at most once every 5 s."
         }
       }
     },
@@ -126,6 +140,20 @@
       "invalid_provisioning_code": "Provisioning code is required.",
       "invalid_mqtt_username": "MQTT username is required.",
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
+    }
+  },
+  "selector": {
+    "grid_power_sign": {
+      "options": {
+        "positive_is_import": "Positive = importing from the grid",
+        "positive_is_export": "Positive = exporting to the grid"
+      }
+    },
+    "battery_power_sign": {
+      "options": {
+        "positive_is_charging": "Positive = charging",
+        "positive_is_discharging": "Positive = discharging"
+      }
     }
   }
 }

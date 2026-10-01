@@ -35,6 +35,26 @@ SERVICE_STOP_BOOST = "stop_boost"
 SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 
 CONF_TOU_RATES_ENTITY = "tou_rates_entity"
+
+CONF_GRID_POWER_ENTITY = "grid_power_entity"
+CONF_GRID_POWER_SIGN = "grid_power_sign"
+CONF_GRID_IMPORT_ENTITY = "grid_import_entity"
+CONF_GRID_EXPORT_ENTITY = "grid_export_entity"
+GRID_SIGN_POSITIVE_IS_IMPORT = "positive_is_import"
+GRID_SIGN_POSITIVE_IS_EXPORT = "positive_is_export"
+GRID_POWER_SIGNS = (GRID_SIGN_POSITIVE_IS_IMPORT, GRID_SIGN_POSITIVE_IS_EXPORT)
+CONF_GRID_STATUS_ENTITY = "grid_status_entity"
+CONF_GRID_STATUS_INVERT = "grid_status_invert"
+
+CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
+CONF_PUBLISH_INTERVAL = "context_publish_interval_s"
+DEFAULT_PUBLISH_INTERVAL_S = 30
+CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
+CONF_BATTERY_POWER_ENTITY = "battery_power_entity"
+CONF_BATTERY_POWER_SIGN = "battery_power_sign"
+BATTERY_SIGN_POSITIVE_IS_CHARGING = "positive_is_charging"
+BATTERY_SIGN_POSITIVE_IS_DISCHARGING = "positive_is_discharging"
+BATTERY_POWER_SIGNS = (BATTERY_SIGN_POSITIVE_IS_CHARGING, BATTERY_SIGN_POSITIVE_IS_DISCHARGING)
 ATTR_SCHEDULE = "schedule"
 
 BINARY_FIELDS = {

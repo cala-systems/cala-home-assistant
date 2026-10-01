@@ -4,18 +4,37 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
 )
 
 from .const import (
+    BATTERY_POWER_SIGNS,
+    BATTERY_SIGN_POSITIVE_IS_CHARGING,
+    DEFAULT_PUBLISH_INTERVAL_S,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_SIGN,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
     CONF_DEVICE_PORT,
+    CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_GRID_POWER_SIGN,
+    CONF_GRID_STATUS_ENTITY,
+    CONF_GRID_STATUS_INVERT,
+    CONF_PUBLISH_INTERVAL,
     CONF_TOU_RATES_ENTITY,
+    GRID_POWER_SIGNS,
+    GRID_SIGN_POSITIVE_IS_IMPORT,
 )
 from .broker_address import async_default_broker
 from .pairing_request import _http_pair
@@ -28,8 +47,51 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional("solar_production_entity"): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
-        vol.Optional("battery_soc_entity"): EntitySelector(
+        vol.Optional(CONF_GRID_POWER_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(
+            CONF_GRID_POWER_SIGN, default=GRID_SIGN_POSITIVE_IS_IMPORT
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=list(GRID_POWER_SIGNS),
+                translation_key=CONF_GRID_POWER_SIGN,
+            )
+        ),
+        vol.Optional(CONF_GRID_IMPORT_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_GRID_EXPORT_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_GRID_STATUS_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
+        ),
+        vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
+        vol.Optional(CONF_BATTERY_SOC_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_BATTERY_POWER_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(
+            CONF_BATTERY_POWER_SIGN, default=BATTERY_SIGN_POSITIVE_IS_CHARGING
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=list(BATTERY_POWER_SIGNS),
+                translation_key=CONF_BATTERY_POWER_SIGN,
+            )
+        ),
+        vol.Optional(
+            CONF_PUBLISH_INTERVAL, default=DEFAULT_PUBLISH_INTERVAL_S
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=10,
+                max=300,
+                step=5,
+                unit_of_measurement="s",
+                mode=NumberSelectorMode.BOX,
+            )
         ),
         vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor"])
@@ -42,7 +104,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, battery, TOU rates)"},
+                    {"value": "entities", "label": "Entity mappings (solar, grid, battery, TOU rates)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )

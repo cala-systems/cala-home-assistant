@@ -295,9 +295,37 @@ If you have configured a **TOU rates entity** (price feed) and it is currently p
 
 The raw `cala.set_tou_schedule` service (Developer Tools / automations) is **not** blocked by an active feed — it is a deliberate developer escape hatch. A manual service call will publish, but the feed will overwrite it on its next tick; the card, being the normal user path, is what enforces feed-wins.
 
-## Solar & Battery Data (Optional)
+## Solar, Grid & Battery Data (Optional)
 
-Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.
+Solar, grid and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.
+
+Map them under **Configure → Entity mappings**:
+
+| Option | Entity | Notes |
+|---|---|---|
+| Solar production | PV power, W or kW | Must be ≥ 0 |
+| Grid power + sign convention | Signed net grid power, W or kW | Pick whether positive means importing (default) or exporting |
+| Grid import / Grid export | Two non-negative power sensors | Alternative to a signed grid entity; both are needed |
+| Grid status (+ invert) | binary_sensor or sensor | On-grid / off-grid. A binary sensor reads `on` = connected unless inverted; sensors may report `on_grid`/`off_grid`, `connected`/`disconnected` or `islanded` |
+| Battery state of charge | 0–100 % | A unitless value of 1 or less logs a warning: it may be a 0–1 fraction |
+| Battery power + sign convention | Signed battery power, W or kW | Pick whether positive means charging (default) or discharging |
+| Publish interval | Seconds (default 30) | Readings are re-sent on this interval even when nothing changes |
+
+The integration publishes to `cala/<device_id>/context` once at startup, on every change of a mapped entity (at most once every 5 s), and on the publish interval. `ts` is the latest time Home Assistant heard from any mapped sensor (`last_reported`), not the send time, so the heater can tell a steady sensor from a frozen one. Unavailable entities are left out rather than sent as zero.
+
+```json
+{
+  "v": 2,
+  "ts": 1790000000.0,
+  "context": {
+    "solar": {"production_w": 5230.0, "producing": true},
+    "grid": {"import_w": 0.0, "export_w": 3100.0, "power_w": -3100.0, "exporting": true, "importing": false, "grid_disconnected": false},
+    "battery": {"soc_percent": 87.0, "power_w": 1200.0, "charging": true, "discharging": false}
+  }
+}
+```
+
+`grid.power_w` is negative when exporting; `battery.power_w` is positive when charging.
 
 ## Removing the Integration
 
