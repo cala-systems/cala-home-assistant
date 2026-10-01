@@ -1,10 +1,16 @@
 import json
 import logging
-from datetime import datetime, timezone
+import time
+from datetime import timedelta
 
 from homeassistant.components import mqtt
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 
 from .const import (
     BATTERY_POWER_SIGNS,
@@ -19,14 +25,29 @@ from .const import (
     CONF_GRID_POWER_SIGN,
     CONF_GRID_STATUS_ENTITY,
     CONF_GRID_STATUS_INVERT,
+    CONF_SOLAR_PRODUCTION_ENTITY,
     GRID_POWER_SIGNS,
     GRID_SIGN_POSITIVE_IS_EXPORT,
 )
 from .helpers import entity_id_from_option
+from .mqtt_helper import _mqtt_available
 
 _LOGGER = logging.getLogger(__name__)
 
 # ---- Constants ----
+
+PAYLOAD_VERSION = 2
+MIN_ON_CHANGE_GAP_S = 5.0
+CONTEXT_ENTITY_KEYS = (
+    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_STATUS_ENTITY,
+    CONF_BATTERY_SOC_ENTITY,
+    CONF_BATTERY_POWER_ENTITY,
+)
+INVALID_STATES = ("unknown", "unavailable", "")
 
 SUPPORTED_POWER_UNITS = {"W", "kW"}
 MAX_REASONABLE_POWER_W = 100_000  # sanity limit
@@ -58,7 +79,7 @@ def _get_float_state(hass: HomeAssistant, entity_id: str):
     if not state:
         return None
 
-    if state.state in ("unknown", "unavailable", ""):
+    if state.state in INVALID_STATES:
         return None
 
     try:
@@ -177,7 +198,7 @@ def _grid_disconnected(hass: HomeAssistant, opts: dict):
     """True when the house is off-grid (utility power lost), False on-grid, None if unknown."""
     entity_id = entity_id_from_option(opts.get(CONF_GRID_STATUS_ENTITY))
     state = _get_state(hass, entity_id)
-    if not state or state.state in ("unknown", "unavailable", ""):
+    if not state or state.state in INVALID_STATES:
         return None
 
     key = state.state.strip().lower().replace("-", "_").replace(" ", "_")
@@ -257,29 +278,34 @@ def _battery_context(hass: HomeAssistant, opts: dict):
     return battery or None
 
 
-# ---- Main publisher ----
+def context_entity_ids(opts: dict) -> list[str]:
+    """Entity ids mapped to the context payload, in option order, de-duplicated."""
+    ids: list[str] = []
+    for key in CONTEXT_ENTITY_KEYS:
+        entity_id = entity_id_from_option(opts.get(key))
+        if entity_id and entity_id not in ids:
+            ids.append(entity_id)
+    return ids
 
-async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """
-    Build and publish Cala energy context over MQTT.
 
-    This function is:
-    - idempotent
-    - safe on partial data
-    - strict on validation
-    """
+def _source_ts(hass: HomeAssistant, opts: dict):
+    """Latest last_reported (else last_updated) across the mapped, available entities."""
+    latest = None
+    for entity_id in context_entity_ids(opts):
+        state = _get_state(hass, entity_id)
+        if not state or state.state in INVALID_STATES:
+            continue
+        when = getattr(state, "last_reported", None) or state.last_updated
+        if when is not None and (latest is None or when > latest):
+            latest = when
+    return None if latest is None else latest.timestamp()
 
-    device_id = entry.data.get(CONF_DEVICE_ID)
-    if not device_id:
-        _LOGGER.error("Missing device_id in config entry")
-        return
 
-    opts = entry.options or {}
-
+def build_context(hass: HomeAssistant, opts: dict) -> dict:
     ctx: dict = {}
 
     # ---- Solar ----
-    solar_entity = entity_id_from_option(opts.get("solar_production_entity"))
+    solar_entity = entity_id_from_option(opts.get(CONF_SOLAR_PRODUCTION_ENTITY))
     if solar_entity:
         solar_w = _normalize_power_w(hass, solar_entity)
         if solar_w is not None:
@@ -298,25 +324,37 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if battery is not None:
         ctx["battery"] = battery
 
-    # ---- Nothing valid? Do not publish ----
-    if not ctx:
+    return ctx
+
+
+# ---- Main publisher ----
+
+async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Build and publish the Cala energy context over MQTT (no-op if nothing is valid)."""
+
+    device_id = entry.data.get(CONF_DEVICE_ID)
+    if not device_id:
+        _LOGGER.error("Missing device_id in config entry")
+        return
+
+    opts = entry.options or {}
+    ctx = build_context(hass, opts)
+    ts = _source_ts(hass, opts)
+
+    if not ctx or ts is None:
         _LOGGER.debug(
             "No valid context data to publish for device %s",
             device_id,
         )
         return
 
-    
     payload = {
-        "v": 1,
-        "ts": datetime.now(tz=timezone.utc).timestamp(),
+        "v": PAYLOAD_VERSION,
+        "ts": ts,
         "context": ctx,
     }
 
     topic = f"cala/{device_id}/context"
-
-    _LOGGER.info("Cala publish_context: publishing payload=%s", ctx)
-    _LOGGER.info("Cala publish_context: publishing topic=%s", topic)
 
     try:
         await mqtt.async_publish(
@@ -326,14 +364,81 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
             qos=0,
             retain=False,
         )
-        _LOGGER.info(
-            "Published Cala context for %s: %s",
-            device_id,
-            payload,
-        )
+        _LOGGER.debug("Published Cala context to %s: %s", topic, payload)
     except Exception as exc:
         _LOGGER.error(
             "Failed to publish Cala context for %s: %s",
             device_id,
             exc,
         )
+
+
+class ContextPublisher:
+    """Publishes the context on state change (rate-limited), on a timer, and once at start."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        interval_s: float,
+        min_gap_s: float = MIN_ON_CHANGE_GAP_S,
+        clock=time.monotonic,
+    ) -> None:
+        self._hass = hass
+        self._entry = entry
+        self._interval_s = interval_s
+        self._min_gap_s = min_gap_s
+        self._clock = clock
+        self._last_publish: float | None = None
+        self._cancel_pending = None
+        self._unsubs: list = []
+
+    @callback
+    def async_start(self, entity_ids: list[str]) -> None:
+        self._unsubs.append(
+            async_track_state_change_event(self._hass, entity_ids, self._on_state_change)
+        )
+        self._unsubs.append(
+            async_track_time_interval(
+                self._hass, self._on_interval, timedelta(seconds=self._interval_s)
+            )
+        )
+        self._hass.async_create_task(self._async_initial_publish())
+
+    @callback
+    def async_stop(self) -> None:
+        for unsub in self._unsubs:
+            unsub()
+        self._unsubs.clear()
+        if self._cancel_pending:
+            self._cancel_pending()
+            self._cancel_pending = None
+
+    async def _async_initial_publish(self) -> None:
+        if await _mqtt_available(self._hass):
+            await self._async_publish()
+
+    async def _async_publish(self) -> None:
+        self._last_publish = self._clock()
+        await publish_context(self._hass, self._entry)
+
+    @callback
+    def _on_interval(self, _now=None) -> None:
+        self._hass.async_create_task(self._async_publish())
+
+    @callback
+    def _on_state_change(self, _event=None) -> None:
+        if self._cancel_pending:
+            return
+        since = None if self._last_publish is None else self._clock() - self._last_publish
+        if since is None or since >= self._min_gap_s:
+            self._hass.async_create_task(self._async_publish())
+            return
+        self._cancel_pending = async_call_later(
+            self._hass, self._min_gap_s - since, self._on_pending_due
+        )
+
+    @callback
+    def _on_pending_due(self, _now=None) -> None:
+        self._cancel_pending = None
+        self._hass.async_create_task(self._async_publish())

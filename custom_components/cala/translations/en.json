@@ -119,11 +119,13 @@
           "battery_soc_entity": "Battery state-of-charge entity (0–100 %)",
           "battery_power_entity": "Battery power entity (signed, W or kW)",
           "battery_power_sign": "Battery power sign convention",
+          "context_publish_interval_s": "Solar/grid/battery publish interval",
           "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
         },
         "data_description": {
           "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair.",
-          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded."
+          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded.",
+          "context_publish_interval_s": "How often the readings are re-sent to the heater even when nothing changes. Changes are also sent as they happen, at most once every 5 s."
         }
       }
     },

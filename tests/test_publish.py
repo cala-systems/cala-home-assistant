@@ -2,9 +2,8 @@
 
 import asyncio
 import json
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -68,7 +67,6 @@ SOC = "sensor.battery_soc"
 
 class TestPayload:
     def test_solar_and_battery(self, published):
-        before = time.time()
         msg = run(
             {SOLAR: power(5230), SOC: FakeState("87", {"unit_of_measurement": "%"})},
             {"solar_production_entity": SOLAR, "battery_soc_entity": SOC},
@@ -77,8 +75,8 @@ class TestPayload:
         assert msg["topic"] == TOPIC
         assert msg["qos"] == 0 and msg["retain"] is False
         payload = msg["payload"]
-        assert payload["v"] == 1
-        assert before - 1 <= payload["ts"] <= time.time() + 1
+        assert payload["v"] == 2
+        assert payload["ts"] == T0.timestamp()
         assert payload["context"] == {
             "solar": {"production_w": 5230.0, "producing": True},
             "battery": {"soc_percent": 87.0},
@@ -439,3 +437,180 @@ class TestSolarProducing:
     def test_producing(self, published, value, producing):
         msg = run({SOLAR: power(value)}, {"solar_production_entity": SOLAR}, published)
         assert msg["payload"]["context"]["solar"]["producing"] is producing
+
+
+class TestSourceTimestamp:
+    def test_latest_last_reported(self, published):
+        msg = run(
+            {
+                SOLAR: power(100, last_updated=T0, last_reported=T0 + timedelta(seconds=40)),
+                GRID: power(-5, last_updated=T0 + timedelta(seconds=10), last_reported=T0 + timedelta(seconds=20)),
+            },
+            {"solar_production_entity": SOLAR, "grid_power_entity": GRID},
+            published,
+        )
+        assert msg["payload"]["ts"] == (T0 + timedelta(seconds=40)).timestamp()
+
+    def test_falls_back_to_last_updated(self, published):
+        msg = run(
+            {SOLAR: power(100, last_updated=T0 + timedelta(seconds=7), last_reported=None)},
+            {"solar_production_entity": SOLAR},
+            published,
+        )
+        assert msg["payload"]["ts"] == (T0 + timedelta(seconds=7)).timestamp()
+
+    def test_unavailable_entity_does_not_advance_ts(self, published):
+        msg = run(
+            {
+                SOLAR: power(100),
+                GRID: power("unavailable", last_reported=T0 + timedelta(hours=1)),
+            },
+            {"solar_production_entity": SOLAR, "grid_power_entity": GRID},
+            published,
+        )
+        assert msg["payload"]["ts"] == T0.timestamp()
+
+    def test_steady_sensor_still_advances(self, published):
+        opts = {"solar_production_entity": SOLAR}
+        first = run({SOLAR: power(92, last_reported=T0)}, opts, published)["payload"]
+        second = run({SOLAR: power(92, last_reported=T0 + timedelta(seconds=30))}, opts, published)["payload"]
+        assert first["context"] == second["context"]
+        assert second["ts"] - first["ts"] == 30
+
+
+class TaskHass(FakeHass):
+    def __init__(self, states):
+        super().__init__(states)
+        self.tasks = []
+
+    def async_create_task(self, coro):
+        self.tasks.append(coro)
+
+    def drain(self):
+        while self.tasks:
+            asyncio.run(self.tasks.pop(0))
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def timers(monkeypatch):
+    t = {"state": [], "interval": [], "later": [], "cancelled": []}
+
+    def track_state(hass, entity_ids, action):
+        t["state"].append((list(entity_ids), action))
+        return lambda: t["cancelled"].append("state")
+
+    def track_interval(hass, action, interval):
+        t["interval"].append((interval, action))
+        return lambda: t["cancelled"].append("interval")
+
+    def call_later(hass, delay, action):
+        t["later"].append((delay, action))
+        return lambda: t["cancelled"].append("later")
+
+    async def mqtt_ready(hass):
+        return t.get("mqtt_ready", True)
+
+    monkeypatch.setattr(publish, "async_track_state_change_event", track_state)
+    monkeypatch.setattr(publish, "async_track_time_interval", track_interval)
+    monkeypatch.setattr(publish, "async_call_later", call_later)
+    monkeypatch.setattr(publish, "_mqtt_available", mqtt_ready)
+    return t
+
+
+class TestContextPublisher:
+    OPTS = {"solar_production_entity": SOLAR, "grid_power_entity": GRID}
+
+    def make(self, interval_s=30):
+        hass = TaskHass({SOLAR: power(100), GRID: power(-50)})
+        clock = Clock()
+        pub = publish.ContextPublisher(hass, FakeEntry(self.OPTS), interval_s, clock=clock)
+        return hass, clock, pub
+
+    def test_context_entity_ids(self):
+        assert publish.context_entity_ids(
+            {
+                "solar_production_entity": {"entity_id": SOLAR},
+                "grid_power_entity": GRID,
+                "grid_import_entity": "",
+                "battery_soc_entity": SOLAR,
+                "grid_status_entity": STATUS,
+            }
+        ) == [SOLAR, GRID, STATUS]
+
+    def test_start_publishes_once_and_schedules(self, published, timers):
+        hass, _, pub = self.make()
+        pub.async_start([SOLAR, GRID])
+        assert timers["state"][0][0] == [SOLAR, GRID]
+        assert timers["interval"][0][0] == timedelta(seconds=30)
+        hass.drain()
+        assert len(published) == 1
+        assert published[0]["payload"]["v"] == 2
+
+    def test_start_waits_for_mqtt(self, published, timers):
+        timers["mqtt_ready"] = False
+        hass, _, pub = self.make()
+        pub.async_start([SOLAR])
+        hass.drain()
+        assert published == []
+
+    def test_interval_publishes(self, published, timers):
+        hass, _, pub = self.make(interval_s=45)
+        pub.async_start([SOLAR])
+        hass.drain()
+        interval, action = timers["interval"][0]
+        assert interval == timedelta(seconds=45)
+        action(None)
+        action(None)
+        hass.drain()
+        assert len(published) == 3
+
+    def test_on_change_is_rate_limited(self, published, timers):
+        hass, clock, pub = self.make()
+        pub.async_start([SOLAR])
+        hass.drain()
+        on_change = timers["state"][0][1]
+
+        clock.now += 2
+        on_change(None)
+        on_change(None)
+        hass.drain()
+        assert len(published) == 1
+        assert len(timers["later"]) == 1
+        delay, due = timers["later"][0]
+        assert delay == pytest.approx(3)
+
+        clock.now += 3
+        due(None)
+        hass.drain()
+        assert len(published) == 2
+
+        clock.now += 5
+        on_change(None)
+        hass.drain()
+        assert len(published) == 3
+        assert len(timers["later"]) == 1
+
+    def test_first_change_publishes_immediately(self, published, timers):
+        hass, _, pub = self.make()
+        pub._on_state_change(None)
+        hass.drain()
+        assert len(published) == 1
+
+    def test_stop_cancels_everything(self, published, timers):
+        hass, clock, pub = self.make()
+        pub.async_start([SOLAR])
+        hass.drain()
+        clock.now += 1
+        timers["state"][0][1](None)
+        pub.async_stop()
+        assert sorted(timers["cancelled"]) == ["interval", "later", "state"]
+        pub.async_stop()
+        assert len(timers["cancelled"]) == 3

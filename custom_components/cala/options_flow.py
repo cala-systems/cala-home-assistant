@@ -7,6 +7,9 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
 )
@@ -14,6 +17,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     BATTERY_POWER_SIGNS,
     BATTERY_SIGN_POSITIVE_IS_CHARGING,
+    DEFAULT_PUBLISH_INTERVAL_S,
     CONF_BATTERY_POWER_ENTITY,
     CONF_BATTERY_POWER_SIGN,
     CONF_BATTERY_SOC_ENTITY,
@@ -27,6 +31,7 @@ from .const import (
     CONF_GRID_POWER_SIGN,
     CONF_GRID_STATUS_ENTITY,
     CONF_GRID_STATUS_INVERT,
+    CONF_PUBLISH_INTERVAL,
     CONF_TOU_RATES_ENTITY,
     GRID_POWER_SIGNS,
     GRID_SIGN_POSITIVE_IS_IMPORT,
@@ -75,6 +80,17 @@ OPTIONS_SCHEMA = vol.Schema(
             SelectSelectorConfig(
                 options=list(BATTERY_POWER_SIGNS),
                 translation_key=CONF_BATTERY_POWER_SIGN,
+            )
+        ),
+        vol.Optional(
+            CONF_PUBLISH_INTERVAL, default=DEFAULT_PUBLISH_INTERVAL_S
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=10,
+                max=300,
+                step=5,
+                unit_of_measurement="s",
+                mode=NumberSelectorMode.BOX,
             )
         ),
         vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(

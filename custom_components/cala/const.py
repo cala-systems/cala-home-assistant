@@ -46,6 +46,9 @@ GRID_POWER_SIGNS = (GRID_SIGN_POSITIVE_IS_IMPORT, GRID_SIGN_POSITIVE_IS_EXPORT)
 CONF_GRID_STATUS_ENTITY = "grid_status_entity"
 CONF_GRID_STATUS_INVERT = "grid_status_invert"
 
+CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
+CONF_PUBLISH_INTERVAL = "context_publish_interval_s"
+DEFAULT_PUBLISH_INTERVAL_S = 30
 CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
 CONF_BATTERY_POWER_ENTITY = "battery_power_entity"
 CONF_BATTERY_POWER_SIGN = "battery_power_sign"

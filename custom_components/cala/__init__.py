@@ -10,15 +10,11 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
     BINARY_FIELDS,
-    CONF_BATTERY_POWER_ENTITY,
-    CONF_BATTERY_SOC_ENTITY,
     CARD_VERSION,
     CONF_DEVICE_ID,
-    CONF_GRID_EXPORT_ENTITY,
-    CONF_GRID_IMPORT_ENTITY,
-    CONF_GRID_POWER_ENTITY,
-    CONF_GRID_STATUS_ENTITY,
+    CONF_PUBLISH_INTERVAL,
     CONF_TOU_RATES_ENTITY,
+    DEFAULT_PUBLISH_INTERVAL_S,
     DOMAIN,
     FRONTEND_URL_BASE,
     SERVICE_SET_TOU_SCHEDULE,
@@ -28,7 +24,7 @@ from .const import (
 )
 from .boost_services import handle_start_boost, handle_stop_boost
 from .helpers import entity_id_from_option
-from .publish import publish_context
+from .publish import ContextPublisher, context_entity_ids
 from .tou_services import (
     SET_TOU_SCHEDULE_SCHEMA,
     handle_set_tou_schedule,
@@ -39,15 +35,6 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "button"]
 
-OPTION_KEYS = (
-    "solar_production_entity",
-    CONF_BATTERY_SOC_ENTITY,
-    CONF_BATTERY_POWER_ENTITY,
-    CONF_GRID_POWER_ENTITY,
-    CONF_GRID_IMPORT_ENTITY,
-    CONF_GRID_EXPORT_ENTITY,
-    CONF_GRID_STATUS_ENTITY,
-)
 # Entity keys that, on state change, trigger a TOU re-publish (not the context
 # publish path).
 TOU_OPTION_KEYS = (CONF_TOU_RATES_ENTITY,)
@@ -144,12 +131,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Build list of entity_ids from options
-    tracked_entities = []
-    for key in OPTION_KEYS:
-        entity_id = entity_id_from_option(opts.get(key))
-        if entity_id:
-            tracked_entities.append(entity_id)
+    tracked_entities = context_entity_ids(opts)
 
     tracked_tou_entities = []
     for key in TOU_OPTION_KEYS:
@@ -158,34 +140,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             tracked_tou_entities.append(entity_id)
 
     if tracked_entities:
+        interval_s = float(opts.get(CONF_PUBLISH_INTERVAL) or DEFAULT_PUBLISH_INTERVAL_S)
         _LOGGER.info(
-            "Cala context: tracking %s for state changes → publish to cala/%s/context",
+            "Cala context: publishing %s to cala/%s/context on change and every %ss",
             tracked_entities,
             device_id,
+            interval_s,
         )
-
-        @callback
-        def _context_state_changed(event):
-            data = event.data
-            entity_id = data["entity_id"]
-            old_state = data.get("old_state")
-            new_state = data.get("new_state")
-
-            _LOGGER.info(
-                "Cala context: state change %s (%s → %s), publishing",
-                entity_id,
-                old_state.state if old_state else None,
-                new_state.state if new_state else None,
-            )
-
-            hass.async_create_task(publish_context(hass, entry))
-
-        unsub = async_track_state_change_event(
-            hass,
-            tracked_entities,
-            _context_state_changed,
-        )
-        hass.data[DOMAIN][entry.entry_id]["state_unsub"] = unsub
+        publisher = ContextPublisher(hass, entry, interval_s)
+        publisher.async_start(tracked_entities)
+        hass.data[DOMAIN][entry.entry_id]["context_publisher"] = publisher
 
     if tracked_tou_entities:
         _LOGGER.info(
@@ -219,10 +183,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data = (hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
-    # Remove state-change listener (context publishing)
-    state_unsub = entry_data.get("state_unsub")
-    if callable(state_unsub):
-        state_unsub()
+    # Stop context publishing (state listener, interval and pending timers)
+    publisher = entry_data.get("context_publisher")
+    if publisher is not None:
+        publisher.async_stop()
     tou_state_unsub = entry_data.get("tou_state_unsub")
     if callable(tou_state_unsub):
         tou_state_unsub()
