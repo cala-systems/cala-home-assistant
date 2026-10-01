@@ -7,6 +7,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (
+    BATTERY_POWER_SIGNS,
+    BATTERY_SIGN_POSITIVE_IS_DISCHARGING,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_SIGN,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_ID,
     CONF_GRID_EXPORT_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
@@ -35,6 +40,7 @@ OFF_GRID_STATES = {
     "off", "false", "0", "off_grid", "offgrid", "disconnected", "grid_disconnected",
     "islanded", "island", "grid_down", "outage", "systemislandedactive",
 }
+_warned_fraction_soc: set[str] = set()
 SOC_MIN = 0.0
 SOC_MAX = 100.0
 
@@ -192,7 +198,22 @@ def _grid_disconnected(hass: HomeAssistant, opts: dict):
     return disconnected
 
 
-def _normalize_soc(entity_id: str, value: float):
+def _soc_percent(hass: HomeAssistant, entity_id: str):
+    """Battery state of charge as 0-100 %, or None."""
+    state = _get_state(hass, entity_id)
+    value = _get_float_state(hass, entity_id)
+    if state is None or value is None:
+        return None
+
+    unit = state.attributes.get("unit_of_measurement")
+    if unit not in (None, "%"):
+        _LOGGER.warning(
+            "Battery SOC entity %s has unsupported unit: %s",
+            entity_id,
+            unit,
+        )
+        return None
+
     if value < SOC_MIN or value > SOC_MAX:
         _LOGGER.warning(
             "Battery SOC entity %s out of range: %s",
@@ -201,8 +222,39 @@ def _normalize_soc(entity_id: str, value: float):
         )
         return None
 
-    # Cala expects 0.0–1.0
-    return round(value / 100.0, 4)
+    if unit is None and 0 < value <= 1.0 and entity_id not in _warned_fraction_soc:
+        _warned_fraction_soc.add(entity_id)
+        _LOGGER.warning(
+            "Battery SOC entity %s has no unit and reads %s; Cala expects 0-100 %%, "
+            "so if this is a 0-1 fraction the battery will look nearly empty",
+            entity_id,
+            value,
+        )
+
+    return round(value, 2) + 0.0
+
+
+def _battery_context(hass: HomeAssistant, opts: dict):
+    battery: dict = {}
+
+    soc_entity = entity_id_from_option(opts.get(CONF_BATTERY_SOC_ENTITY))
+    if soc_entity:
+        soc = _soc_percent(hass, soc_entity)
+        if soc is not None:
+            battery["soc_percent"] = soc
+
+    power_entity = entity_id_from_option(opts.get(CONF_BATTERY_POWER_ENTITY))
+    if power_entity:
+        power_w = _normalize_signed_power_w(hass, power_entity)
+        if power_w is not None:
+            sign = _sign_option(opts, CONF_BATTERY_POWER_SIGN, BATTERY_POWER_SIGNS)
+            if sign == BATTERY_SIGN_POSITIVE_IS_DISCHARGING:
+                power_w = -power_w + 0.0
+            battery["power_w"] = power_w
+            battery["charging"] = power_w > 0
+            battery["discharging"] = power_w < 0
+
+    return battery or None
 
 
 # ---- Main publisher ----
@@ -231,7 +283,7 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if solar_entity:
         solar_w = _normalize_power_w(hass, solar_entity)
         if solar_w is not None:
-            ctx.setdefault("solar", {})["production_w"] = solar_w
+            ctx["solar"] = {"production_w": solar_w, "producing": solar_w > 0}
 
     # ---- Grid ----
     grid = _grid_context(hass, opts)
@@ -242,13 +294,9 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
         ctx.setdefault("grid", {})["grid_disconnected"] = disconnected
 
     # ---- Battery ----
-    battery_soc_entity = entity_id_from_option(opts.get("battery_soc_entity"))
-    if battery_soc_entity:
-        soc_raw = _get_float_state(hass, battery_soc_entity)
-        if soc_raw is not None:
-            soc_norm = _normalize_soc(battery_soc_entity, soc_raw)
-            if soc_norm is not None:
-                ctx.setdefault("battery", {})["soc"] = soc_norm
+    battery = _battery_context(hass, opts)
+    if battery is not None:
+        ctx["battery"] = battery
 
     # ---- Nothing valid? Do not publish ----
     if not ctx:

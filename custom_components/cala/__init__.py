@@ -10,6 +10,8 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
     BINARY_FIELDS,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_SOC_ENTITY,
     CARD_VERSION,
     CONF_DEVICE_ID,
     CONF_GRID_EXPORT_ENTITY,
@@ -39,7 +41,8 @@ PLATFORMS = ["sensor", "binary_sensor", "button"]
 
 OPTION_KEYS = (
     "solar_production_entity",
-    "battery_soc_entity",
+    CONF_BATTERY_SOC_ENTITY,
+    CONF_BATTERY_POWER_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_EXPORT_ENTITY,

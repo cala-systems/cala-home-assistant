@@ -66,7 +66,7 @@ SOLAR = "sensor.pv_power"
 SOC = "sensor.battery_soc"
 
 
-class TestV1Payload:
+class TestPayload:
     def test_solar_and_battery(self, published):
         before = time.time()
         msg = run(
@@ -80,13 +80,13 @@ class TestV1Payload:
         assert payload["v"] == 1
         assert before - 1 <= payload["ts"] <= time.time() + 1
         assert payload["context"] == {
-            "solar": {"production_w": 5230.0},
-            "battery": {"soc": 0.87},
+            "solar": {"production_w": 5230.0, "producing": True},
+            "battery": {"soc_percent": 87.0},
         }
 
     def test_kw_is_converted(self, published):
         msg = run({SOLAR: power("5.23", "kW")}, {"solar_production_entity": SOLAR}, published)
-        assert msg["payload"]["context"] == {"solar": {"production_w": 5230.0}}
+        assert msg["payload"]["context"] == {"solar": {"production_w": 5230.0, "producing": True}}
 
     @pytest.mark.parametrize(
         "state",
@@ -107,7 +107,7 @@ class TestV1Payload:
             {"solar_production_entity": SOLAR, "battery_soc_entity": SOC},
             published,
         )
-        assert msg["payload"]["context"] == {"battery": {"soc": 0.5}}
+        assert msg["payload"]["context"] == {"battery": {"soc_percent": 50.0}}
 
     @pytest.mark.parametrize("value", ["-1", "100.1", "unavailable"])
     def test_bad_soc_is_dropped(self, published, value):
@@ -116,11 +116,11 @@ class TestV1Payload:
             {"solar_production_entity": SOLAR, "battery_soc_entity": SOC},
             published,
         )
-        assert msg["payload"]["context"] == {"solar": {"production_w": 100.0}}
+        assert msg["payload"]["context"] == {"solar": {"production_w": 100.0, "producing": True}}
 
     def test_battery_omitted_when_unmapped(self, published):
         msg = run({SOLAR: power(0)}, {"solar_production_entity": SOLAR}, published)
-        assert msg["payload"]["context"] == {"solar": {"production_w": 0.0}}
+        assert msg["payload"]["context"] == {"solar": {"production_w": 0.0, "producing": False}}
 
     def test_nothing_valid_publishes_nothing(self, published):
         assert run({SOLAR: power("unavailable")}, {"solar_production_entity": SOLAR}, published) is None
@@ -146,13 +146,13 @@ class TestOptionShapes:
             published,
         )
         assert msg["payload"]["context"] == {
-            "solar": {"production_w": 1200.0},
-            "battery": {"soc": 0.4},
+            "solar": {"production_w": 1200.0, "producing": True},
+            "battery": {"soc_percent": 40.0},
         }
 
     def test_whitespace_and_empty_options(self, published):
         msg = run({SOLAR: power(10)}, {"solar_production_entity": f"  {SOLAR} ", "battery_soc_entity": ""}, published)
-        assert msg["payload"]["context"] == {"solar": {"production_w": 10.0}}
+        assert msg["payload"]["context"] == {"solar": {"production_w": 10.0, "producing": True}}
 
 
 GRID = "sensor.grid_power"
@@ -226,7 +226,7 @@ class TestGridSigned:
         if state is not None:
             states[GRID] = state
         msg = run(states, {"grid_power_entity": GRID, "solar_production_entity": SOLAR}, published)
-        assert msg["payload"]["context"] == {"solar": {"production_w": 800.0}}
+        assert msg["payload"]["context"] == {"solar": {"production_w": 800.0, "producing": True}}
 
     def test_unavailable_grid_alone_publishes_nothing(self, published):
         assert run({GRID: power("unavailable")}, {"grid_power_entity": GRID}, published) is None
@@ -343,3 +343,99 @@ class TestGridDisconnected:
             published,
         )
         assert g == {"grid_disconnected": True}
+
+
+BATT = "sensor.battery_power"
+
+
+def battery(states, options, published):
+    msg = run(states, options, published)
+    return None if msg is None else msg["payload"]["context"].get("battery")
+
+
+def pct(value, unit="%"):
+    return FakeState(str(value), {"unit_of_measurement": unit} if unit else {})
+
+
+class TestBattery:
+    def test_full_block(self, published):
+        assert battery(
+            {SOC: pct(87), BATT: power(1200)},
+            {"battery_soc_entity": SOC, "battery_power_entity": BATT},
+            published,
+        ) == {"soc_percent": 87.0, "power_w": 1200.0, "charging": True, "discharging": False}
+
+    def test_old_soc_field_is_gone(self, published):
+        b = battery({SOC: pct(87)}, {"battery_soc_entity": SOC}, published)
+        assert "soc" not in b
+
+    def test_discharging(self, published):
+        b = battery({BATT: power("-2.5", "kW")}, {"battery_power_entity": BATT}, published)
+        assert b == {"power_w": -2500.0, "charging": False, "discharging": True}
+
+    def test_positive_is_discharging_is_flipped(self, published):
+        b = battery(
+            {BATT: power(800)},
+            {"battery_power_entity": BATT, "battery_power_sign": "positive_is_discharging"},
+            published,
+        )
+        assert b == {"power_w": -800.0, "charging": False, "discharging": True}
+
+    def test_idle(self, published):
+        b = battery(
+            {BATT: power(0)},
+            {"battery_power_entity": BATT, "battery_power_sign": "positive_is_discharging"},
+            published,
+        )
+        assert b == {"power_w": 0.0, "charging": False, "discharging": False}
+        assert "-0.0" not in json.dumps(published[-1]["payload"])
+
+    def test_power_out_of_range_dropped(self, published):
+        b = battery({SOC: pct(50), BATT: power(-100_001)}, {"battery_soc_entity": SOC, "battery_power_entity": BATT}, published)
+        assert b == {"soc_percent": 50.0}
+
+    def test_power_unavailable_keeps_soc(self, published):
+        b = battery({SOC: pct(50), BATT: power("unavailable")}, {"battery_soc_entity": SOC, "battery_power_entity": BATT}, published)
+        assert b == {"soc_percent": 50.0}
+
+    def test_unmapped_omits_battery(self, published):
+        msg = run({SOLAR: power(1), SOC: pct(50), BATT: power(5)}, {"solar_production_entity": SOLAR}, published)
+        assert "battery" not in msg["payload"]["context"]
+
+    def test_all_unavailable_omits_battery(self, published):
+        msg = run(
+            {SOLAR: power(1), SOC: pct("unavailable"), BATT: power("unknown")},
+            {"solar_production_entity": SOLAR, "battery_soc_entity": SOC, "battery_power_entity": BATT},
+            published,
+        )
+        assert "battery" not in msg["payload"]["context"]
+
+
+class TestSoc:
+    def test_no_unit_passes_through(self, published):
+        assert battery({SOC: pct(64, None)}, {"battery_soc_entity": SOC}, published) == {"soc_percent": 64.0}
+
+    def test_other_unit_dropped(self, published):
+        msg = run({SOC: pct(64, "kWh"), SOLAR: power(1)}, {"battery_soc_entity": SOC, "solar_production_entity": SOLAR}, published)
+        assert "battery" not in msg["payload"]["context"]
+
+    def test_fraction_without_unit_warns_but_is_not_rescaled(self, published, caplog):
+        publish._warned_fraction_soc.clear()
+        with caplog.at_level("WARNING"):
+            assert battery({SOC: pct("0.87", None)}, {"battery_soc_entity": SOC}, published) == {"soc_percent": 0.87}
+            battery({SOC: pct("0.87", None)}, {"battery_soc_entity": SOC}, published)
+        assert sum("0-1 fraction" in r.getMessage() for r in caplog.records) == 1
+
+    @pytest.mark.parametrize("state", [pct("0.5"), pct(0, None), pct(5, None)])
+    def test_no_fraction_warning(self, published, caplog, state):
+        publish._warned_fraction_soc.clear()
+        with caplog.at_level("WARNING"):
+            battery({SOC: state}, {"battery_soc_entity": SOC}, published)
+        assert not any("0-1 fraction" in r.getMessage() for r in caplog.records)
+
+
+class TestSolarProducing:
+    @pytest.mark.parametrize("value, producing", [(0, False), ("0.01", True), (5230, True)])
+    def test_producing(self, published, value, producing):
+        msg = run({SOLAR: power(value)}, {"solar_production_entity": SOLAR}, published)
+        assert msg["payload"]["context"]["solar"]["producing"] is producing

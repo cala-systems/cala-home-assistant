@@ -12,6 +12,11 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    BATTERY_POWER_SIGNS,
+    BATTERY_SIGN_POSITIVE_IS_CHARGING,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_SIGN,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
@@ -58,8 +63,19 @@ OPTIONS_SCHEMA = vol.Schema(
             EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
         ),
         vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
-        vol.Optional("battery_soc_entity"): EntitySelector(
+        vol.Optional(CONF_BATTERY_SOC_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_BATTERY_POWER_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(
+            CONF_BATTERY_POWER_SIGN, default=BATTERY_SIGN_POSITIVE_IS_CHARGING
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=list(BATTERY_POWER_SIGNS),
+                translation_key=CONF_BATTERY_POWER_SIGN,
+            )
         ),
         vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor"])
