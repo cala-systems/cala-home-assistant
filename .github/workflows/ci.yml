@@ -35,6 +35,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test dependencies
-        run: pip install pytest voluptuous aiohttp "cryptography>=41.0.0"
+        run: pip install pytest pyyaml voluptuous aiohttp "cryptography>=41.0.0"
       - name: Run tests
         run: pytest -q

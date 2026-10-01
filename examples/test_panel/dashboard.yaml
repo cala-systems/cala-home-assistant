@@ -1,0 +1,155 @@
+# Cala test control panel view. Paste into a dashboard's raw configuration
+# editor under `views:` (or as a whole dashboard after `views:`).
+#
+# Cala entity ids are "<domain>.<device prefix>_<field>". The prefix is the
+# slugified device name; a heater paired through the config flow is named
+# "Cala Water Heater", so the prefix is `cala_water_heater`. A second heater
+# with the same name gets `_2` appended to every id (e.g.
+# sensor.cala_water_heater_top_temperature_2). If yours differ, find-and-replace
+# `cala_water_heater_` below with the prefix shown under
+# Settings -> Devices & services -> Cala -> entities.
+title: Cala test panel
+path: cala-test
+icon: mdi:test-tube
+type: sections
+max_columns: 2
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Test inputs
+      - type: entities
+        title: Values sent to the heater
+        grid_options:
+          columns: full
+        entities:
+          - entity: input_number.cala_test_pv_w
+            name: PV production
+          - entity: input_number.cala_test_grid_w
+            name: Grid (+ import / - export)
+          - entity: input_number.cala_test_battery_soc
+            name: Battery SOC
+          - entity: input_number.cala_test_battery_w
+            name: Battery (+ charge / - discharge)
+          - entity: input_boolean.cala_test_grid_connected
+            name: Grid connected
+      - type: entities
+        title: Sensor availability (off = unavailable, left out of the payload)
+        grid_options:
+          columns: full
+        entities:
+          - entity: input_boolean.cala_test_pv_available
+            name: PV sensor
+          - entity: input_boolean.cala_test_grid_power_available
+            name: Grid power sensor
+          - entity: input_boolean.cala_test_grid_status_available
+            name: Grid status sensor
+          - entity: input_boolean.cala_test_battery_soc_available
+            name: Battery SOC sensor
+          - entity: input_boolean.cala_test_battery_power_available
+            name: Battery power sensor
+      - type: entities
+        title: Entities mapped in the Cala options
+        grid_options:
+          columns: full
+        entities:
+          - entity: sensor.cala_test_solar_production
+            name: solar_production_entity
+            secondary_info: last-updated
+          - entity: sensor.cala_test_grid_power
+            name: grid_power_entity
+            secondary_info: last-updated
+          - entity: binary_sensor.cala_test_grid_status
+            name: grid_status_entity
+            secondary_info: last-updated
+          - entity: sensor.cala_test_battery_soc
+            name: battery_soc_entity
+            secondary_info: last-updated
+          - entity: sensor.cala_test_battery_power
+            name: battery_power_entity
+            secondary_info: last-updated
+
+  - type: grid
+    cards:
+      - type: heading
+        heading: Heater read-outs
+      - type: markdown
+        title: Last context published
+        grid_options:
+          columns: full
+        content: |
+          {% set s = 'sensor.cala_test_last_context' %}
+          {% if states(s) in ['unknown', 'unavailable'] %}
+          Nothing seen on `cala/+/context` yet. Check that the Cala options map
+          at least one test entity and that it is available.
+          {% else %}
+          **ts** {{ as_local(as_datetime(states(s))).strftime('%H:%M:%S') }}
+          (sensor last_reported, not send time)
+
+          ```json
+          {{ state_attr(s, 'context') | tojson(indent=2) }}
+          ```
+          {% endif %}
+      # Status card shipped with the integration (auto-registered).
+      - type: custom:cala-card
+        grid_options:
+          columns: full
+      - type: entities
+        title: Cala water heater
+        grid_options:
+          columns: full
+        entities:
+          - entity: sensor.cala_water_heater_connection
+            name: Connection
+          - entity: sensor.cala_water_heater_top_temperature
+            name: Top
+          - entity: sensor.cala_water_heater_upper_temperature
+            name: Upper
+          - entity: sensor.cala_water_heater_lower_temperature
+            name: Lower
+          - entity: sensor.cala_water_heater_water_available
+            name: Water available
+          - entity: sensor.cala_water_heater_compressor_frequency
+            name: Compressor
+          - entity: binary_sensor.cala_water_heater_upper_element_on
+            name: Upper element
+          - entity: binary_sensor.cala_water_heater_lower_element_on
+            name: Lower element
+          - entity: binary_sensor.cala_water_heater_fan_on
+            name: Fan
+          - entity: binary_sensor.cala_water_heater_fan_speed_high
+            name: Fan high
+          - entity: binary_sensor.cala_water_heater_boost_mode_on
+            name: Boost mode
+          - entity: sensor.cala_water_heater_power
+            name: Power
+          - entity: sensor.cala_water_heater_energy_today
+            name: Energy today
+          - entity: sensor.cala_water_heater_ambient_temperature
+            name: Ambient
+          - entity: sensor.cala_water_heater_delivery_temperature
+            name: Delivery
+          - entity: sensor.cala_water_heater_inlet_temperature
+            name: Inlet
+          - entity: sensor.cala_water_heater_flow_rate
+            name: Flow
+      - type: history-graph
+        title: Test inputs vs heater power
+        hours_to_show: 6
+        grid_options:
+          columns: full
+        entities:
+          - entity: sensor.cala_test_solar_production
+          - entity: sensor.cala_test_grid_power
+          - entity: sensor.cala_test_battery_power
+          - entity: sensor.cala_water_heater_power
+      - type: history-graph
+        title: Heater state
+        hours_to_show: 6
+        grid_options:
+          columns: full
+        entities:
+          - entity: sensor.cala_water_heater_compressor_frequency
+          - entity: binary_sensor.cala_water_heater_upper_element_on
+          - entity: binary_sensor.cala_water_heater_lower_element_on
+          - entity: binary_sensor.cala_test_grid_status
