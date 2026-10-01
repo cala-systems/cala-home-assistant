@@ -21,6 +21,7 @@ from .const import (
     STATUS_CARD_VERSION,
 )
 from .boost_services import handle_start_boost, handle_stop_boost
+from .helpers import entity_id_from_option
 from .publish import publish_context
 from .tou_services import (
     SET_TOU_SCHEDULE_SCHEMA,
@@ -39,17 +40,6 @@ OPTION_KEYS = (
 # Entity keys that, on state change, trigger a TOU re-publish (not the context
 # publish path).
 TOU_OPTION_KEYS = (CONF_TOU_RATES_ENTITY,)
-
-
-def _entity_id_from_option(value):
-    """Normalize option value to entity_id string (EntitySelector may return dict or string)."""
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value.get("entity_id") or value.get("id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -146,13 +136,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Build list of entity_ids from options
     tracked_entities = []
     for key in OPTION_KEYS:
-        entity_id = _entity_id_from_option(opts.get(key))
+        entity_id = entity_id_from_option(opts.get(key))
         if entity_id:
             tracked_entities.append(entity_id)
 
     tracked_tou_entities = []
     for key in TOU_OPTION_KEYS:
-        entity_id = _entity_id_from_option(opts.get(key))
+        entity_id = entity_id_from_option(opts.get(key))
         if entity_id:
             tracked_tou_entities.append(entity_id)
 
