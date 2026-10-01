@@ -153,3 +153,137 @@ class TestOptionShapes:
     def test_whitespace_and_empty_options(self, published):
         msg = run({SOLAR: power(10)}, {"solar_production_entity": f"  {SOLAR} ", "battery_soc_entity": ""}, published)
         assert msg["payload"]["context"] == {"solar": {"production_w": 10.0}}
+
+
+GRID = "sensor.grid_power"
+IMPORT = "sensor.grid_import"
+EXPORT = "sensor.grid_export"
+
+
+def grid(states, options, published):
+    msg = run(states, options, published)
+    return None if msg is None else msg["payload"]["context"].get("grid")
+
+
+class TestGridSigned:
+    def test_export_positive_is_import(self, published):
+        assert grid({GRID: power(-3100)}, {"grid_power_entity": GRID}, published) == {
+            "import_w": 0.0,
+            "export_w": 3100.0,
+            "power_w": -3100.0,
+            "exporting": True,
+            "importing": False,
+        }
+
+    def test_import_positive_is_import(self, published):
+        assert grid(
+            {GRID: power("1.5", "kW")},
+            {"grid_power_entity": GRID, "grid_power_sign": "positive_is_import"},
+            published,
+        ) == {
+            "import_w": 1500.0,
+            "export_w": 0.0,
+            "power_w": 1500.0,
+            "exporting": False,
+            "importing": True,
+        }
+
+    def test_positive_is_export_is_flipped(self, published):
+        g = grid(
+            {GRID: power(3100)},
+            {"grid_power_entity": GRID, "grid_power_sign": "positive_is_export"},
+            published,
+        )
+        assert g["power_w"] == -3100.0
+        assert g["export_w"] == 3100.0 and g["import_w"] == 0.0
+        assert g["exporting"] is True and g["importing"] is False
+
+    def test_zero_is_neither(self, published):
+        g = grid(
+            {GRID: power(0)},
+            {"grid_power_entity": GRID, "grid_power_sign": "positive_is_export"},
+            published,
+        )
+        assert g == {"import_w": 0.0, "export_w": 0.0, "power_w": 0.0, "exporting": False, "importing": False}
+        assert "-0.0" not in json.dumps(published[-1]["payload"])
+
+    def test_no_deadband(self, published):
+        g = grid({GRID: power("-0.5")}, {"grid_power_entity": GRID}, published)
+        assert g["exporting"] is True and g["export_w"] == 0.5
+
+    def test_bound_is_symmetric(self, published):
+        assert grid({GRID: power(-100_000)}, {"grid_power_entity": GRID}, published)["export_w"] == 100_000.0
+        assert grid({GRID: power(-100_001), SOLAR: power(1)}, {"grid_power_entity": GRID, "solar_production_entity": SOLAR}, published) is None
+        assert grid({GRID: power(100_001), SOLAR: power(1)}, {"grid_power_entity": GRID, "solar_production_entity": SOLAR}, published) is None
+
+    def test_unknown_sign_falls_back_to_import(self, published):
+        g = grid({GRID: power(200)}, {"grid_power_entity": GRID, "grid_power_sign": "bogus"}, published)
+        assert g["power_w"] == 200.0 and g["importing"] is True
+
+    @pytest.mark.parametrize("state", [power("unavailable"), power("unknown"), power(5, "VA"), None])
+    def test_unavailable_omits_grid(self, published, state):
+        states = {SOLAR: power(800)}
+        if state is not None:
+            states[GRID] = state
+        msg = run(states, {"grid_power_entity": GRID, "solar_production_entity": SOLAR}, published)
+        assert msg["payload"]["context"] == {"solar": {"production_w": 800.0}}
+
+    def test_unavailable_grid_alone_publishes_nothing(self, published):
+        assert run({GRID: power("unavailable")}, {"grid_power_entity": GRID}, published) is None
+
+    def test_dict_option(self, published):
+        assert grid({GRID: power(-10)}, {"grid_power_entity": {"entity_id": GRID}}, published)["power_w"] == -10.0
+
+
+class TestGridPair:
+    def test_exporting(self, published):
+        assert grid(
+            {IMPORT: power(0), EXPORT: power("3.1", "kW")},
+            {"grid_import_entity": IMPORT, "grid_export_entity": EXPORT},
+            published,
+        ) == {
+            "import_w": 0.0,
+            "export_w": 3100.0,
+            "power_w": -3100.0,
+            "exporting": True,
+            "importing": False,
+        }
+
+    def test_importing(self, published):
+        g = grid(
+            {IMPORT: power(450), EXPORT: power(0)},
+            {"grid_import_entity": IMPORT, "grid_export_entity": EXPORT},
+            published,
+        )
+        assert g["power_w"] == 450.0 and g["importing"] is True and g["exporting"] is False
+
+    @pytest.mark.parametrize("bad", [IMPORT, EXPORT])
+    def test_either_unavailable_omits_grid(self, published, bad):
+        states = {IMPORT: power(0), EXPORT: power(100), SOLAR: power(1)}
+        states[bad] = power("unavailable")
+        msg = run(
+            states,
+            {"grid_import_entity": IMPORT, "grid_export_entity": EXPORT, "solar_production_entity": SOLAR},
+            published,
+        )
+        assert "grid" not in msg["payload"]["context"]
+
+    def test_negative_magnitude_rejected(self, published):
+        msg = run(
+            {IMPORT: power(0), EXPORT: power(-100), SOLAR: power(1)},
+            {"grid_import_entity": IMPORT, "grid_export_entity": EXPORT, "solar_production_entity": SOLAR},
+            published,
+        )
+        assert "grid" not in msg["payload"]["context"]
+
+    def test_only_one_of_pair_mapped_omits_grid(self, published):
+        msg = run({IMPORT: power(10), SOLAR: power(1)}, {"grid_import_entity": IMPORT, "solar_production_entity": SOLAR}, published)
+        assert "grid" not in msg["payload"]["context"]
+
+    def test_signed_entity_wins_over_pair(self, published):
+        g = grid(
+            {GRID: power(-50), IMPORT: power(999), EXPORT: power(0)},
+            {"grid_power_entity": GRID, "grid_import_entity": IMPORT, "grid_export_entity": EXPORT},
+            published,
+        )
+        assert g["power_w"] == -50.0

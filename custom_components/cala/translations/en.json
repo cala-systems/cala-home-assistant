@@ -65,7 +65,7 @@
       },
       "init": {
         "menu_options": {
-          "entities": "Entity mappings (solar, battery)",
+          "entities": "Entity mappings (solar, grid, battery)",
           "reprovision": "Re-provision device (pairing code, broker, credentials)"
         }
       },
@@ -110,8 +110,15 @@
         "title": "Entity mappings",
         "data": {
           "solar_production_entity": "Solar production entity",
+          "grid_power_entity": "Grid power entity (signed, W or kW)",
+          "grid_power_sign": "Grid power sign convention",
+          "grid_import_entity": "Grid import entity (W or kW; use with grid export instead of a signed grid entity)",
+          "grid_export_entity": "Grid export entity (W or kW)",
           "battery_soc_entity": "Battery state-of-charge entity",
           "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
+        },
+        "data_description": {
+          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair."
         }
       }
     },
@@ -126,6 +133,14 @@
       "invalid_provisioning_code": "Provisioning code is required.",
       "invalid_mqtt_username": "MQTT username is required.",
       "mqtt_not_configured": "Home Assistant messaging (MQTT) is not set up. Please install and enable the MQTT integration, then try again."
+    }
+  },
+  "selector": {
+    "grid_power_sign": {
+      "options": {
+        "positive_is_import": "Positive = importing from the grid",
+        "positive_is_export": "Positive = exporting to the grid"
+      }
     }
   }
 }

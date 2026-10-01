@@ -35,6 +35,14 @@ SERVICE_STOP_BOOST = "stop_boost"
 SERVICE_SET_TOU_SCHEDULE = "set_tou_schedule"
 
 CONF_TOU_RATES_ENTITY = "tou_rates_entity"
+
+CONF_GRID_POWER_ENTITY = "grid_power_entity"
+CONF_GRID_POWER_SIGN = "grid_power_sign"
+CONF_GRID_IMPORT_ENTITY = "grid_import_entity"
+CONF_GRID_EXPORT_ENTITY = "grid_export_entity"
+GRID_SIGN_POSITIVE_IS_IMPORT = "positive_is_import"
+GRID_SIGN_POSITIVE_IS_EXPORT = "positive_is_export"
+GRID_POWER_SIGNS = (GRID_SIGN_POSITIVE_IS_IMPORT, GRID_SIGN_POSITIVE_IS_EXPORT)
 ATTR_SCHEDULE = "schedule"
 
 BINARY_FIELDS = {

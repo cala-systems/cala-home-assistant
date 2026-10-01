@@ -12,6 +12,9 @@ from .const import (
     BINARY_FIELDS,
     CARD_VERSION,
     CONF_DEVICE_ID,
+    CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_POWER_ENTITY,
     CONF_TOU_RATES_ENTITY,
     DOMAIN,
     FRONTEND_URL_BASE,
@@ -36,6 +39,9 @@ PLATFORMS = ["sensor", "binary_sensor", "button"]
 OPTION_KEYS = (
     "solar_production_entity",
     "battery_soc_entity",
+    CONF_GRID_POWER_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_EXPORT_ENTITY,
 )
 # Entity keys that, on state change, trigger a TOU re-publish (not the context
 # publish path).
@@ -200,7 +206,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not tracked_entities and not tracked_tou_entities:
         _LOGGER.info(
-            "Cala: no option entities configured (solar/battery/tou); no state listeners registered"
+            "Cala: no option entities configured (solar/grid/battery/tou); no state listeners registered"
         )
 
     return True

@@ -6,7 +6,15 @@ from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
-from .const import CONF_DEVICE_ID
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_GRID_POWER_SIGN,
+    GRID_POWER_SIGNS,
+    GRID_SIGN_POSITIVE_IS_EXPORT,
+)
 from .helpers import entity_id_from_option
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,7 +54,8 @@ def _get_float_state(hass: HomeAssistant, entity_id: str):
         return None
 
 
-def _normalize_power_w(hass: HomeAssistant, entity_id: str):
+def _read_power_w(hass: HomeAssistant, entity_id: str):
+    """Return the entity's power in W (any sign), or None if missing/bad unit."""
     state = _get_state(hass, entity_id)
     if not state:
         return None
@@ -68,6 +77,15 @@ def _normalize_power_w(hass: HomeAssistant, entity_id: str):
     if unit == "kW":
         value = value * 1000.0
 
+    return value
+
+
+def _normalize_power_w(hass: HomeAssistant, entity_id: str):
+    """Non-negative power in W (PV production, import/export magnitudes)."""
+    value = _read_power_w(hass, entity_id)
+    if value is None:
+        return None
+
     if value < 0 or value > MAX_REASONABLE_POWER_W:
         _LOGGER.warning(
             "Entity %s power value out of range: %s W",
@@ -76,7 +94,65 @@ def _normalize_power_w(hass: HomeAssistant, entity_id: str):
         )
         return None
 
-    return round(value, 2)
+    return round(value, 2) + 0.0
+
+
+def _normalize_signed_power_w(hass: HomeAssistant, entity_id: str):
+    """Signed power in W, as the entity reports it, bounded to +/-100 kW."""
+    value = _read_power_w(hass, entity_id)
+    if value is None:
+        return None
+
+    if abs(value) > MAX_REASONABLE_POWER_W:
+        _LOGGER.warning(
+            "Entity %s power value out of range: %s W",
+            entity_id,
+            value,
+        )
+        return None
+
+    return round(value, 2) + 0.0
+
+
+def _sign_option(opts: dict, key: str, allowed: tuple[str, ...]) -> str:
+    value = opts.get(key) or allowed[0]
+    if value not in allowed:
+        _LOGGER.warning("Option %s has unknown value %s; using %s", key, value, allowed[0])
+        return allowed[0]
+    return value
+
+
+def _grid_context(hass: HomeAssistant, opts: dict):
+    """Grid power on the wire convention: power_w > 0 importing, < 0 exporting."""
+    grid_entity = entity_id_from_option(opts.get(CONF_GRID_POWER_ENTITY))
+    import_entity = entity_id_from_option(opts.get(CONF_GRID_IMPORT_ENTITY))
+    export_entity = entity_id_from_option(opts.get(CONF_GRID_EXPORT_ENTITY))
+
+    if grid_entity:
+        power_w = _normalize_signed_power_w(hass, grid_entity)
+        if power_w is None:
+            return None
+        sign = _sign_option(opts, CONF_GRID_POWER_SIGN, GRID_POWER_SIGNS)
+        if sign == GRID_SIGN_POSITIVE_IS_EXPORT:
+            power_w = -power_w + 0.0
+        import_w = power_w if power_w > 0 else 0.0
+        export_w = -power_w if power_w < 0 else 0.0
+    elif import_entity and export_entity:
+        import_w = _normalize_power_w(hass, import_entity)
+        export_w = _normalize_power_w(hass, export_entity)
+        if import_w is None or export_w is None:
+            return None
+        power_w = round(import_w - export_w, 2) + 0.0
+    else:
+        return None
+
+    return {
+        "import_w": import_w,
+        "export_w": export_w,
+        "power_w": power_w,
+        "exporting": export_w > 0,
+        "importing": import_w > 0,
+    }
 
 
 def _normalize_soc(entity_id: str, value: float):
@@ -119,6 +195,11 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
         solar_w = _normalize_power_w(hass, solar_entity)
         if solar_w is not None:
             ctx.setdefault("solar", {})["production_w"] = solar_w
+
+    # ---- Grid ----
+    grid = _grid_context(hass, opts)
+    if grid is not None:
+        ctx["grid"] = grid
 
     # ---- Battery ----
     battery_soc_entity = entity_id_from_option(opts.get("battery_soc_entity"))

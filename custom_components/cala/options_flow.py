@@ -15,7 +15,13 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_HOST,
     CONF_DEVICE_PORT,
+    CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_GRID_POWER_SIGN,
     CONF_TOU_RATES_ENTITY,
+    GRID_POWER_SIGNS,
+    GRID_SIGN_POSITIVE_IS_IMPORT,
 )
 from .broker_address import async_default_broker
 from .pairing_request import _http_pair
@@ -26,6 +32,23 @@ _LOGGER = logging.getLogger(__name__)
 OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Optional("solar_production_entity"): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_GRID_POWER_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(
+            CONF_GRID_POWER_SIGN, default=GRID_SIGN_POSITIVE_IS_IMPORT
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=list(GRID_POWER_SIGNS),
+                translation_key=CONF_GRID_POWER_SIGN,
+            )
+        ),
+        vol.Optional(CONF_GRID_IMPORT_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor", "input_number"])
+        ),
+        vol.Optional(CONF_GRID_EXPORT_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
         vol.Optional("battery_soc_entity"): EntitySelector(
@@ -42,7 +65,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, battery, TOU rates)"},
+                    {"value": "entities", "label": "Entity mappings (solar, grid, battery, TOU rates)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )
