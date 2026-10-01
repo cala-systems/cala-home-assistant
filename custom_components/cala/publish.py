@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
 from .const import CONF_DEVICE_ID
+from .helpers import entity_id_from_option
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,14 +114,14 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     ctx: dict = {}
 
     # ---- Solar ----
-    solar_entity = opts.get("solar_production_entity")
+    solar_entity = entity_id_from_option(opts.get("solar_production_entity"))
     if solar_entity:
         solar_w = _normalize_power_w(hass, solar_entity)
         if solar_w is not None:
             ctx.setdefault("solar", {})["production_w"] = solar_w
 
     # ---- Battery ----
-    battery_soc_entity = opts.get("battery_soc_entity")
+    battery_soc_entity = entity_id_from_option(opts.get("battery_soc_entity"))
     if battery_soc_entity:
         soc_raw = _get_float_state(hass, battery_soc_entity)
         if soc_raw is not None:
