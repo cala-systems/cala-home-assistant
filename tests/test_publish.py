@@ -287,3 +287,59 @@ class TestGridPair:
             published,
         )
         assert g["power_w"] == -50.0
+
+
+STATUS = "binary_sensor.grid_status"
+
+
+class TestGridDisconnected:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            ("on", False),
+            ("off", True),
+            ("on_grid", False),
+            ("off_grid", True),
+            ("Off-Grid", True),
+            ("Connected", False),
+            ("islanded", True),
+            ("SystemIslandedActive", True),
+        ],
+    )
+    def test_states(self, published, value, expected):
+        g = grid({STATUS: FakeState(value)}, {"grid_status_entity": STATUS}, published)
+        assert g == {"grid_disconnected": expected}
+
+    def test_invert(self, published):
+        opts = {"grid_status_entity": STATUS, "grid_status_invert": True}
+        assert grid({STATUS: FakeState("on")}, opts, published) == {"grid_disconnected": True}
+        assert grid({STATUS: FakeState("off")}, opts, published) == {"grid_disconnected": False}
+
+    @pytest.mark.parametrize("value", ["unavailable", "unknown", "", "synchronizing"])
+    def test_unknown_omits(self, published, value):
+        msg = run(
+            {STATUS: FakeState(value), SOLAR: power(1)},
+            {"grid_status_entity": STATUS, "solar_production_entity": SOLAR},
+            published,
+        )
+        assert "grid" not in msg["payload"]["context"]
+
+    def test_unmapped_omits(self, published):
+        g = grid({GRID: power(-5), STATUS: FakeState("off")}, {"grid_power_entity": GRID}, published)
+        assert "grid_disconnected" not in g
+
+    def test_alongside_power(self, published):
+        g = grid(
+            {GRID: power(-3100), STATUS: FakeState("on")},
+            {"grid_power_entity": GRID, "grid_status_entity": STATUS},
+            published,
+        )
+        assert g["grid_disconnected"] is False and g["exporting"] is True
+
+    def test_power_unavailable_keeps_status(self, published):
+        g = grid(
+            {GRID: power("unavailable"), STATUS: FakeState("off")},
+            {"grid_power_entity": GRID, "grid_status_entity": STATUS},
+            published,
+        )
+        assert g == {"grid_disconnected": True}

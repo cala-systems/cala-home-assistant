@@ -114,11 +114,14 @@
           "grid_power_sign": "Grid power sign convention",
           "grid_import_entity": "Grid import entity (W or kW; use with grid export instead of a signed grid entity)",
           "grid_export_entity": "Grid export entity (W or kW)",
+          "grid_status_entity": "Grid status entity (on-grid / off-grid)",
+          "grid_status_invert": "Invert grid status (entity is on during an outage)",
           "battery_soc_entity": "Battery state-of-charge entity",
           "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
         },
         "data_description": {
-          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair."
+          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair.",
+          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded."
         }
       }
     },

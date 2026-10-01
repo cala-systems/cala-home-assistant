@@ -15,6 +15,7 @@ from .const import (
     CONF_GRID_EXPORT_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_POWER_ENTITY,
+    CONF_GRID_STATUS_ENTITY,
     CONF_TOU_RATES_ENTITY,
     DOMAIN,
     FRONTEND_URL_BASE,
@@ -42,6 +43,7 @@ OPTION_KEYS = (
     CONF_GRID_POWER_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_EXPORT_ENTITY,
+    CONF_GRID_STATUS_ENTITY,
 )
 # Entity keys that, on state change, trigger a TOU re-publish (not the context
 # publish path).

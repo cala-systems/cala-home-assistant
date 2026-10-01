@@ -12,6 +12,8 @@ from .const import (
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_GRID_POWER_SIGN,
+    CONF_GRID_STATUS_ENTITY,
+    CONF_GRID_STATUS_INVERT,
     GRID_POWER_SIGNS,
     GRID_SIGN_POSITIVE_IS_EXPORT,
 )
@@ -23,6 +25,16 @@ _LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_POWER_UNITS = {"W", "kW"}
 MAX_REASONABLE_POWER_W = 100_000  # sanity limit
+# Grid-status states, lower-cased with spaces and dashes as underscores.
+# binary_sensor "on" means on-grid (e.g. Powerwall grid_status); invert if not.
+ON_GRID_STATES = {
+    "on", "true", "1", "on_grid", "ongrid", "connected", "grid_connected",
+    "systemgridconnected",
+}
+OFF_GRID_STATES = {
+    "off", "false", "0", "off_grid", "offgrid", "disconnected", "grid_disconnected",
+    "islanded", "island", "grid_down", "outage", "systemislandedactive",
+}
 SOC_MIN = 0.0
 SOC_MAX = 100.0
 
@@ -155,6 +167,31 @@ def _grid_context(hass: HomeAssistant, opts: dict):
     }
 
 
+def _grid_disconnected(hass: HomeAssistant, opts: dict):
+    """True when the house is off-grid (utility power lost), False on-grid, None if unknown."""
+    entity_id = entity_id_from_option(opts.get(CONF_GRID_STATUS_ENTITY))
+    state = _get_state(hass, entity_id)
+    if not state or state.state in ("unknown", "unavailable", ""):
+        return None
+
+    key = state.state.strip().lower().replace("-", "_").replace(" ", "_")
+    if key in ON_GRID_STATES:
+        disconnected = False
+    elif key in OFF_GRID_STATES:
+        disconnected = True
+    else:
+        _LOGGER.warning(
+            "Grid status entity %s has unrecognised state: %s",
+            entity_id,
+            state.state,
+        )
+        return None
+
+    if opts.get(CONF_GRID_STATUS_INVERT):
+        disconnected = not disconnected
+    return disconnected
+
+
 def _normalize_soc(entity_id: str, value: float):
     if value < SOC_MIN or value > SOC_MAX:
         _LOGGER.warning(
@@ -200,6 +237,9 @@ async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
     grid = _grid_context(hass, opts)
     if grid is not None:
         ctx["grid"] = grid
+    disconnected = _grid_disconnected(hass, opts)
+    if disconnected is not None:
+        ctx.setdefault("grid", {})["grid_disconnected"] = disconnected
 
     # ---- Battery ----
     battery_soc_entity = entity_id_from_option(opts.get("battery_soc_entity"))
