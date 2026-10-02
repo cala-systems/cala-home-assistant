@@ -1,0 +1,139 @@
+# Cala test control panel: hand-set solar, grid and battery values for the
+# Cala integration to publish, with no real hardware. Load as a package:
+#
+#   homeassistant:
+#     packages:
+#       cala_test_panel: !include packages/cala_test_panel.yaml
+#
+# See README.md in this folder for the option mapping.
+
+input_number:
+  cala_test_pv_w:
+    name: Test PV production
+    min: 0
+    max: 15000
+    step: 50
+    initial: 0
+    mode: slider
+    unit_of_measurement: W
+    icon: mdi:solar-power
+  cala_test_grid_w:
+    name: Test grid power (+ import / - export)
+    min: -15000
+    max: 15000
+    step: 50
+    initial: 0
+    mode: slider
+    unit_of_measurement: W
+    icon: mdi:transmission-tower
+  cala_test_battery_soc:
+    name: Test battery state of charge
+    min: 0
+    max: 100
+    step: 1
+    initial: 50
+    mode: slider
+    unit_of_measurement: "%"
+    icon: mdi:battery-50
+  cala_test_battery_w:
+    name: Test battery power (+ charge / - discharge)
+    min: -10000
+    max: 10000
+    step: 50
+    initial: 0
+    mode: slider
+    unit_of_measurement: W
+    icon: mdi:home-battery
+
+input_boolean:
+  cala_test_grid_connected:
+    name: Test grid connected
+    initial: true
+    icon: mdi:transmission-tower-export
+  cala_test_pv_available:
+    name: Test PV sensor available
+    initial: true
+  cala_test_grid_power_available:
+    name: Test grid power sensor available
+    initial: true
+  cala_test_battery_soc_available:
+    name: Test battery SOC sensor available
+    initial: true
+  cala_test_battery_power_available:
+    name: Test battery power sensor available
+    initial: true
+  cala_test_grid_status_available:
+    name: Test grid status sensor available
+    initial: true
+
+# Trigger-based so every trigger rewrites the state. An unchanged rewrite still
+# advances last_reported, which is what the integration sends as ts.
+template:
+  - triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
+      - trigger: time_pattern
+        seconds: "/10"
+      - trigger: state
+        entity_id:
+          - input_number.cala_test_pv_w
+          - input_number.cala_test_grid_w
+          - input_number.cala_test_battery_soc
+          - input_number.cala_test_battery_w
+          - input_boolean.cala_test_grid_connected
+          - input_boolean.cala_test_pv_available
+          - input_boolean.cala_test_grid_power_available
+          - input_boolean.cala_test_battery_soc_available
+          - input_boolean.cala_test_battery_power_available
+          - input_boolean.cala_test_grid_status_available
+    sensor:
+      - name: Cala Test Solar Production
+        unique_id: cala_test_solar_production
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: "{{ states('input_number.cala_test_pv_w') | float(0) }}"
+        availability: "{{ is_state('input_boolean.cala_test_pv_available', 'on') }}"
+      - name: Cala Test Grid Power
+        unique_id: cala_test_grid_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: "{{ states('input_number.cala_test_grid_w') | float(0) }}"
+        availability: "{{ is_state('input_boolean.cala_test_grid_power_available', 'on') }}"
+      - name: Cala Test Battery SOC
+        unique_id: cala_test_battery_soc
+        device_class: battery
+        state_class: measurement
+        unit_of_measurement: "%"
+        state: "{{ states('input_number.cala_test_battery_soc') | float(0) }}"
+        availability: "{{ is_state('input_boolean.cala_test_battery_soc_available', 'on') }}"
+      - name: Cala Test Battery Power
+        unique_id: cala_test_battery_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: "{{ states('input_number.cala_test_battery_w') | float(0) }}"
+        availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
+    binary_sensor:
+      - name: Cala Test Grid Status
+        unique_id: cala_test_grid_status
+        device_class: connectivity
+        state: "{{ is_state('input_boolean.cala_test_grid_connected', 'on') }}"
+        availability: "{{ is_state('input_boolean.cala_test_grid_status_available', 'on') }}"
+
+# Echo of what actually went out on cala/<device_id>/context, read back from
+# the broker. Not part of the integration; with several Cala devices it shows
+# whichever published last.
+mqtt:
+  sensor:
+    - name: Cala Test Last Context
+      unique_id: cala_test_last_context
+      state_topic: cala/+/context
+      device_class: timestamp
+      value_template: "{{ value_json.ts | timestamp_local }}"
+      json_attributes_topic: cala/+/context
+      json_attributes_template: "{{ value_json | tojson }}"
+      icon: mdi:code-json
