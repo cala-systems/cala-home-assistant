@@ -18,7 +18,7 @@ DASHBOARD_TEXT = (PANEL_DIR / "dashboard.yaml").read_text()
 DASHBOARD = yaml.safe_load(DASHBOARD_TEXT)
 README = (PANEL_DIR / "README.md").read_text()
 
-TEST_ID_RE = re.compile(r"\b(?:sensor|binary_sensor|input_number|input_boolean)\.cala_test_\w+")
+TEST_ID_RE = re.compile(r"\b(?:sensor|binary_sensor|input_number|input_select|input_boolean)\.cala_test_\w+")
 MIN_PUBLISH_INTERVAL_S = 10  # options_flow NumberSelector min
 
 
@@ -38,6 +38,7 @@ def _template_entities() -> dict[str, dict]:
 TEMPLATES = _template_entities()
 PACKAGE_IDS = (
     {f"input_number.{k}" for k in PACKAGE["input_number"]}
+    | {f"input_select.{k}" for k in PACKAGE["input_select"]}
     | {f"input_boolean.{k}" for k in PACKAGE["input_boolean"]}
     | set(TEMPLATES)
     | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["mqtt"]["sensor"]}
@@ -112,7 +113,7 @@ def test_triggers_rewrite_on_every_input_and_faster_than_any_publish_interval():
     (block,) = PACKAGE["template"]
     triggers = block["triggers"]
     watched = {e for t in triggers if t["trigger"] == "state" for e in t["entity_id"]}
-    inputs = {i for i in PACKAGE_IDS if i.startswith(("input_number.", "input_boolean."))}
+    inputs = {i for i in PACKAGE_IDS if i.startswith(("input_number.", "input_select.", "input_boolean."))}
     assert watched == inputs
     (pattern,) = [t for t in triggers if t["trigger"] == "time_pattern"]
     assert int(pattern["seconds"].lstrip("/")) <= MIN_PUBLISH_INTERVAL_S
@@ -166,7 +167,8 @@ def test_kwh_meters_integrate_the_matching_power_sensor():
 T0 = datetime.fromtimestamp(README_PAYLOAD["ts"], tz=timezone.utc)
 EXAMPLE_INPUTS = {
     "input_number.cala_test_pv_w": "6000.0",
-    "input_number.cala_test_grid_w": "-2500.0",
+    "input_number.cala_test_grid_magnitude_w": "2500.0",
+    "input_select.cala_test_grid_direction": "Export",
     "input_number.cala_test_battery_soc": "95.0",
     "input_number.cala_test_battery_w": "-800.0",
     "input_boolean.cala_test_grid_connected": "on",
@@ -190,6 +192,9 @@ class FakeHass:
         return self._states.get(entity_id)
 
 
+DIRECTION_RE = re.compile(r"\{\{ (.+?) if is_state\('(input_select\.\w+)', '(\w+)'\) else (.+?) \}\}")
+
+
 def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
     """Evaluate the package's templates for the subset of Jinja they use."""
     states = {}
@@ -197,10 +202,18 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
         if entity_id in unavailable:
             states[entity_id] = FakeState("unavailable")
             continue
-        (source,) = re.findall(r"input_\w+\.\w+", ent["state"])
+        sources = re.findall(r"input_\w+\.\w+", ent["state"])
+        (source,) = [s for s in sources if not s.startswith("input_select.")]
         raw = inputs[source]
+        chosen = DIRECTION_RE.search(ent["state"])
         if entity_id.startswith("binary_sensor."):
             value = "on" if raw == "on" else "off"
+        elif chosen:
+            # {{ A if is_state('input_select.x', 'Option') else B }}, A/B in w, 0 - w, 0
+            then, select, option, otherwise = chosen.groups()
+            pick = then if inputs[select] == option else otherwise
+            w = float(raw)
+            value = str({"w": w, "0 - w": 0 - w, "0": 0.0}[pick])
         elif "0 -" in ent["state"]:
             value = str(max(-float(raw), 0.0))
         elif "| max" in ent["state"]:
@@ -218,6 +231,36 @@ def _payload(hass, opts=README_OPTIONS) -> dict | None:
     if not ctx or ts is None:
         return None
     return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
+
+
+def test_grid_direction_is_a_selector_and_the_power_slider_is_never_negative():
+    (direction,) = PACKAGE["input_select"].values()
+    assert direction["options"] == ["Import", "Export"]
+    assert direction["initial"] == "Import"
+    assert PACKAGE["input_number"]["cala_test_grid_magnitude_w"]["min"] == 0
+    grid_state = TEMPLATES["sensor.cala_test_grid_power"]["state"]
+    assert "is_state('input_select.cala_test_grid_direction', 'Export')" in grid_state
+
+
+@pytest.mark.parametrize(
+    "direction, magnitude, power_w, importing, exporting",
+    [("Import", "1400.0", 1400.0, True, False), ("Export", "1400.0", -1400.0, False, True)],
+)
+def test_grid_direction_reaches_the_payload(direction, magnitude, power_w, importing, exporting):
+    inputs = dict(
+        EXAMPLE_INPUTS,
+        **{
+            "input_select.cala_test_grid_direction": direction,
+            "input_number.cala_test_grid_magnitude_w": magnitude,
+        },
+    )
+    hass = _render(inputs)
+    assert float(hass.get("sensor.cala_test_grid_import_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_grid_export_power").state) == max(-power_w, 0.0)
+    grid = _payload(hass, ENERGY_OPTIONS)["context"]["grid"]
+    assert grid["power_w"] == power_w
+    assert grid["importing"] is importing
+    assert grid["exporting"] is exporting
 
 
 def test_readme_worked_example_is_what_the_publisher_sends():
