@@ -170,7 +170,8 @@ EXAMPLE_INPUTS = {
     "input_number.cala_test_grid_magnitude_w": "2500.0",
     "input_select.cala_test_grid_direction": "Export",
     "input_number.cala_test_battery_soc": "95.0",
-    "input_number.cala_test_battery_w": "-800.0",
+    "input_number.cala_test_battery_magnitude_w": "800.0",
+    "input_select.cala_test_battery_direction": "Charge",
     "input_boolean.cala_test_grid_connected": "on",
 }
 
@@ -214,10 +215,6 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
             pick = then if inputs[select] == option else otherwise
             w = float(raw)
             value = str({"w": w, "0 - w": 0 - w, "0": 0.0}[pick])
-        elif "0 -" in ent["state"]:
-            value = str(max(-float(raw), 0.0))
-        elif "| max" in ent["state"]:
-            value = str(max(float(raw), 0.0))
         else:
             value = str(float(raw))
         unit = ent.get("unit_of_measurement")
@@ -233,13 +230,24 @@ def _payload(hass, opts=README_OPTIONS) -> dict | None:
     return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
 
 
-def test_grid_direction_is_a_selector_and_the_power_slider_is_never_negative():
-    (direction,) = PACKAGE["input_select"].values()
-    assert direction["options"] == ["Import", "Export"]
-    assert direction["initial"] == "Import"
-    assert PACKAGE["input_number"]["cala_test_grid_magnitude_w"]["min"] == 0
-    grid_state = TEMPLATES["sensor.cala_test_grid_power"]["state"]
-    assert "is_state('input_select.cala_test_grid_direction', 'Export')" in grid_state
+@pytest.mark.parametrize(
+    "select, options, magnitude, sensor",
+    [
+        ("cala_test_grid_direction", ["Import", "Export"], "cala_test_grid_magnitude_w", "sensor.cala_test_grid_power"),
+        (
+            "cala_test_battery_direction",
+            ["Charge", "Discharge"],
+            "cala_test_battery_magnitude_w",
+            "sensor.cala_test_battery_power",
+        ),
+    ],
+)
+def test_power_direction_is_a_selector_and_the_power_slider_is_never_negative(select, options, magnitude, sensor):
+    direction = PACKAGE["input_select"][select]
+    assert direction["options"] == options
+    assert direction["initial"] == options[0]
+    assert PACKAGE["input_number"][magnitude]["min"] == 0
+    assert DIRECTION_RE.search(TEMPLATES[sensor]["state"]).group(2) == f"input_select.{select}"
 
 
 @pytest.mark.parametrize(
@@ -261,6 +269,30 @@ def test_grid_direction_reaches_the_payload(direction, magnitude, power_w, impor
     assert grid["power_w"] == power_w
     assert grid["importing"] is importing
     assert grid["exporting"] is exporting
+
+
+@pytest.mark.parametrize(
+    "direction, power_w, charging, discharging",
+    [("Charge", 600.0, True, False), ("Discharge", -600.0, False, True)],
+)
+def test_battery_direction_reaches_the_payload(direction, power_w, charging, discharging):
+    inputs = dict(
+        EXAMPLE_INPUTS,
+        **{
+            "input_select.cala_test_battery_direction": direction,
+            "input_number.cala_test_battery_magnitude_w": "600.0",
+        },
+    )
+    hass = _render(inputs)
+    # HA's sign on the sensor (+ = discharging); the heater's sign in the payload.
+    assert float(hass.get("sensor.cala_test_battery_power").state) == -power_w
+    assert float(hass.get("sensor.cala_test_battery_charge_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_battery_discharge_power").state) == max(-power_w, 0.0)
+    battery = _payload(hass, ENERGY_OPTIONS)["context"]["battery"]
+    assert battery == _payload(hass)["context"]["battery"]
+    assert battery["power_w"] == power_w
+    assert battery["charging"] is charging
+    assert battery["discharging"] is discharging
 
 
 def test_readme_worked_example_is_what_the_publisher_sends():

@@ -20,9 +20,10 @@ input_number:
     mode: slider
     unit_of_measurement: W
     icon: mdi:solar-power
-  # Grid power is a direction plus a size, not one signed slider: a slider
-  # from -15000 to 15000 gives no hint which way is export (SW-3876).
-  # sensor.cala_test_grid_power below combines them into the signed value.
+  # Grid and battery power are a direction plus a size, not one signed
+  # slider: a slider from -max to +max gives no hint which way is export or
+  # discharge (SW-3876). The template sensors below combine them into the
+  # signed values the integration reads.
   cala_test_grid_magnitude_w:
     name: Test grid power (direction set separately)
     min: 0
@@ -41,9 +42,9 @@ input_number:
     mode: slider
     unit_of_measurement: "%"
     icon: mdi:battery-50
-  cala_test_battery_w:
-    name: Test battery power (+ discharge / - charge)
-    min: -10000
+  cala_test_battery_magnitude_w:
+    name: Test battery power (direction set separately)
+    min: 0
     max: 10000
     step: 50
     initial: 0
@@ -59,6 +60,13 @@ input_select:
       - Export
     initial: Import
     icon: mdi:swap-horizontal
+  cala_test_battery_direction:
+    name: Test battery direction
+    options:
+      - Charge
+      - Discharge
+    initial: Charge
+    icon: mdi:swap-vertical
 
 input_boolean:
   cala_test_grid_connected:
@@ -97,7 +105,8 @@ template:
           - input_number.cala_test_grid_magnitude_w
           - input_select.cala_test_grid_direction
           - input_number.cala_test_battery_soc
-          - input_number.cala_test_battery_w
+          - input_number.cala_test_battery_magnitude_w
+          - input_select.cala_test_battery_direction
           - input_boolean.cala_test_grid_connected
           - input_boolean.cala_test_pv_available
           - input_boolean.cala_test_grid_power_available
@@ -134,7 +143,10 @@ template:
         device_class: power
         state_class: measurement
         unit_of_measurement: W
-        state: "{{ states('input_number.cala_test_battery_w') | float(0) }}"
+        # HA convention: + = discharging, - = charging
+        state: >-
+          {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
+          {{ 0 - w if is_state('input_select.cala_test_battery_direction', 'Charge') else w }}
         availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
       # Directional power for the kWh meters below. Energy wants import/export
       # and charge/discharge energy as separate, always-positive meters.
@@ -161,14 +173,18 @@ template:
         device_class: power
         state_class: measurement
         unit_of_measurement: W
-        state: "{{ [states('input_number.cala_test_battery_w') | float(0), 0] | max }}"
+        state: >-
+          {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
+          {{ w if is_state('input_select.cala_test_battery_direction', 'Discharge') else 0 }}
         availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
       - name: Cala Test Battery Charge Power
         unique_id: cala_test_battery_charge_power
         device_class: power
         state_class: measurement
         unit_of_measurement: W
-        state: "{{ [0 - states('input_number.cala_test_battery_w') | float(0), 0] | max }}"
+        state: >-
+          {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
+          {{ w if is_state('input_select.cala_test_battery_direction', 'Charge') else 0 }}
         availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
     binary_sensor:
       - name: Cala Test Grid Status
