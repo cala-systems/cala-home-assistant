@@ -25,12 +25,16 @@ sections:
         entities:
           - entity: input_number.cala_test_pv_w
             name: PV production
-          - entity: input_number.cala_test_grid_w
-            name: Grid (+ import / - export)
+          - entity: input_select.cala_test_grid_direction
+            name: Grid direction
+          - entity: input_number.cala_test_grid_magnitude_w
+            name: Grid power, in the direction above
           - entity: input_number.cala_test_battery_soc
             name: Battery SOC
-          - entity: input_number.cala_test_battery_w
-            name: Battery (+ charge / - discharge)
+          - entity: input_select.cala_test_battery_direction
+            name: Battery direction
+          - entity: input_number.cala_test_battery_magnitude_w
+            name: Battery power, in the direction above
           - entity: input_boolean.cala_test_grid_connected
             name: Grid connected
       - type: entities
