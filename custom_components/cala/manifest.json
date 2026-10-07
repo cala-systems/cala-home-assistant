@@ -1,6 +1,9 @@
 {
   "domain": "cala",
   "name": "Cala",
+  "after_dependencies": [
+    "energy"
+  ],
   "codeowners": [
     "@cala-systems"
   ],

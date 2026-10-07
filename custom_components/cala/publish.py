@@ -329,15 +329,19 @@ def build_context(hass: HomeAssistant, opts: dict) -> dict:
 
 # ---- Main publisher ----
 
-async def publish_context(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Build and publish the Cala energy context over MQTT (no-op if nothing is valid)."""
+async def publish_context(hass: HomeAssistant, entry: ConfigEntry, opts: dict | None = None) -> None:
+    """Build and publish the Cala energy context over MQTT (no-op if nothing is valid).
+
+    opts are the resolved context options (see energy_sources); defaults to the entry's.
+    """
 
     device_id = entry.data.get(CONF_DEVICE_ID)
     if not device_id:
         _LOGGER.error("Missing device_id in config entry")
         return
 
-    opts = entry.options or {}
+    if opts is None:
+        opts = entry.options or {}
     ctx = build_context(hass, opts)
     ts = _source_ts(hass, opts)
 
@@ -381,11 +385,13 @@ class ContextPublisher:
         hass: HomeAssistant,
         entry: ConfigEntry,
         interval_s: float,
+        opts: dict | None = None,
         min_gap_s: float = MIN_ON_CHANGE_GAP_S,
         clock=time.monotonic,
     ) -> None:
         self._hass = hass
         self._entry = entry
+        self._opts = opts
         self._interval_s = interval_s
         self._min_gap_s = min_gap_s
         self._clock = clock
@@ -420,7 +426,7 @@ class ContextPublisher:
 
     async def _async_publish(self) -> None:
         self._last_publish = self._clock()
-        await publish_context(self._hass, self._entry)
+        await publish_context(self._hass, self._entry, self._opts)
 
     @callback
     def _on_interval(self, _now=None) -> None:

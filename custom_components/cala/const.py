@@ -47,6 +47,9 @@ CONF_GRID_STATUS_ENTITY = "grid_status_entity"
 CONF_GRID_STATUS_INVERT = "grid_status_invert"
 
 CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
+# Off (default): solar/grid/battery come from HA's Energy dashboard settings.
+# On: use the hand-mapped entities below (test panel, unusual setups).
+CONF_MANUAL_CONTEXT = "manual_context_entities"
 CONF_PUBLISH_INTERVAL = "context_publish_interval_s"
 DEFAULT_PUBLISH_INTERVAL_S = 30
 CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"

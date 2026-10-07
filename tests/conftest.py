@@ -45,7 +45,16 @@ _stub_module(
     ServiceCall=object,
     callback=_callback,
 )
-_stub_module("homeassistant.config_entries", ConfigEntry=object)
+class _ConfigEntryState:
+    LOADED = "loaded"
+    NOT_LOADED = "not_loaded"
+
+
+_stub_module(
+    "homeassistant.config_entries",
+    ConfigEntry=object,
+    ConfigEntryState=_ConfigEntryState,
+)
 _mqtt = _stub_module("homeassistant.components.mqtt")
 _stub_module("homeassistant.components", mqtt=_mqtt)
 

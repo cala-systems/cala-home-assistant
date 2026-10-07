@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cala import const, publish
+from cala import const, energy_sources, publish
 from cala.sensor import TELEMETRY_FIELDS
 
 PANEL_DIR = Path(__file__).resolve().parents[1] / "examples" / "test_panel"
@@ -41,7 +41,9 @@ PACKAGE_IDS = (
     | {f"input_boolean.{k}" for k in PACKAGE["input_boolean"]}
     | set(TEMPLATES)
     | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["mqtt"]["sensor"]}
+    | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["sensor"]}
 )
+METERS = {f"sensor.{_slug(s['name'])}": s for s in PACKAGE["sensor"]}
 
 
 def _dashboard_entities(node) -> list[str]:
@@ -60,6 +62,10 @@ def _fenced_after(marker: str) -> str:
 
 
 README_OPTIONS = yaml.safe_load(_fenced_after("options"))
+README_ENERGY = yaml.safe_load(_fenced_after("energy"))
+ENERGY_OPTIONS = energy_sources.effective_context_options(
+    {}, energy_sources.mapping_from_energy_prefs(README_ENERGY)
+)
 README_PAYLOAD = json.loads(_fenced_after("example-payload"))
 
 
@@ -117,12 +123,42 @@ def test_readme_options_are_real_option_names_and_values():
         const.CONF_GRID_POWER_SIGN: const.GRID_POWER_SIGNS,
         const.CONF_BATTERY_POWER_SIGN: const.BATTERY_POWER_SIGNS,
     }
+    assert README_OPTIONS.get(const.CONF_MANUAL_CONTEXT) is True
     for key, value in README_OPTIONS.items():
+        if key == const.CONF_MANUAL_CONTEXT:
+            continue
         if key in allowed_signs:
             assert value in allowed_signs[key]
         else:
             assert key in publish.CONTEXT_ENTITY_KEYS
             assert value in TEMPLATES
+
+
+def test_readme_energy_settings_name_package_sensors():
+    named = {
+        v for source in README_ENERGY["energy_sources"]
+        for k, v in source.items() if k.startswith("stat_")
+    }
+    assert named <= PACKAGE_IDS
+
+
+def test_energy_settings_cover_every_power_sensor_except_grid_status():
+    mapped = set(publish.context_entity_ids(ENERGY_OPTIONS))
+    assert mapped == {
+        "sensor.cala_test_solar_production",
+        "sensor.cala_test_grid_power",
+        "sensor.cala_test_battery_power",
+        "sensor.cala_test_battery_soc",
+    }
+
+
+def test_kwh_meters_integrate_the_matching_power_sensor():
+    for meter_id, meter in METERS.items():
+        assert meter["platform"] == "integration"
+        assert meter["unit_prefix"] == "k"
+        source = meter["source"]
+        assert source in TEMPLATES, meter_id
+        assert meter_id.removesuffix("_energy") == source.removesuffix("_power").removesuffix("_production")
 
 
 # ---- The worked example, through the real publisher ----
@@ -132,7 +168,7 @@ EXAMPLE_INPUTS = {
     "input_number.cala_test_pv_w": "6000.0",
     "input_number.cala_test_grid_w": "-2500.0",
     "input_number.cala_test_battery_soc": "95.0",
-    "input_number.cala_test_battery_w": "800.0",
+    "input_number.cala_test_battery_w": "-800.0",
     "input_boolean.cala_test_grid_connected": "on",
 }
 
@@ -165,6 +201,10 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
         raw = inputs[source]
         if entity_id.startswith("binary_sensor."):
             value = "on" if raw == "on" else "off"
+        elif "0 -" in ent["state"]:
+            value = str(max(-float(raw), 0.0))
+        elif "| max" in ent["state"]:
+            value = str(max(float(raw), 0.0))
         else:
             value = str(float(raw))
         unit = ent.get("unit_of_measurement")
@@ -172,16 +212,27 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
     return FakeHass(states)
 
 
-def _payload(hass) -> dict | None:
-    ctx = publish.build_context(hass, README_OPTIONS)
-    ts = publish._source_ts(hass, README_OPTIONS)
+def _payload(hass, opts=README_OPTIONS) -> dict | None:
+    ctx = publish.build_context(hass, opts)
+    ts = publish._source_ts(hass, opts)
     if not ctx or ts is None:
         return None
     return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
 
 
 def test_readme_worked_example_is_what_the_publisher_sends():
-    assert _payload(_render(EXAMPLE_INPUTS)) == README_PAYLOAD
+    assert _payload(_render(EXAMPLE_INPUTS), ENERGY_OPTIONS) == README_PAYLOAD
+
+
+def test_hand_mapped_example_adds_only_grid_disconnected():
+    expected = json.loads(json.dumps(README_PAYLOAD))
+    expected["context"]["grid"]["grid_disconnected"] = False
+    assert _payload(_render(EXAMPLE_INPUTS)) == expected
+
+
+def test_energy_path_drops_grid_when_grid_power_is_unavailable():
+    hass = _render(EXAMPLE_INPUTS, {"sensor.cala_test_grid_power"})
+    assert "grid" not in _payload(hass, ENERGY_OPTIONS)["context"]
 
 
 @pytest.mark.parametrize(

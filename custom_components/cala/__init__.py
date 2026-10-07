@@ -12,6 +12,7 @@ from .const import (
     BINARY_FIELDS,
     CARD_VERSION,
     CONF_DEVICE_ID,
+    CONF_MANUAL_CONTEXT,
     CONF_PUBLISH_INTERVAL,
     CONF_TOU_RATES_ENTITY,
     DEFAULT_PUBLISH_INTERVAL_S,
@@ -23,6 +24,12 @@ from .const import (
     STATUS_CARD_VERSION,
 )
 from .boost_services import handle_start_boost, handle_stop_boost
+from .energy_sources import (
+    MAPPING_KEY,
+    async_energy_mapping,
+    async_setup_energy_listener,
+    effective_context_options,
+)
 from .helpers import entity_id_from_option
 from .publish import ContextPublisher, context_entity_ids
 from .tou_services import (
@@ -131,7 +138,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Forward to button.py, number.py, etc.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    tracked_entities = context_entity_ids(opts)
+    # Solar/grid/battery come from the Energy dashboard settings unless the
+    # entry is switched to hand-mapped entities.
+    energy_mapping = await async_energy_mapping(hass)
+    hass.data[DOMAIN][entry.entry_id][MAPPING_KEY] = energy_mapping
+    await async_setup_energy_listener(hass)
+    context_opts = effective_context_options(opts, energy_mapping)
+    _LOGGER.info(
+        "Cala context sources (%s): %s",
+        "hand-mapped" if opts.get(CONF_MANUAL_CONTEXT) else "from Energy settings",
+        context_entity_ids(context_opts) or "none",
+    )
+    tracked_entities = context_entity_ids(context_opts)
 
     tracked_tou_entities = []
     for key in TOU_OPTION_KEYS:
@@ -147,7 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device_id,
             interval_s,
         )
-        publisher = ContextPublisher(hass, entry, interval_s)
+        publisher = ContextPublisher(hass, entry, interval_s, context_opts)
         publisher.async_start(tracked_entities)
         hass.data[DOMAIN][entry.entry_id]["context_publisher"] = publisher
 
