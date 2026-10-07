@@ -17,9 +17,12 @@ input_number:
     mode: slider
     unit_of_measurement: W
     icon: mdi:solar-power
-  cala_test_grid_w:
-    name: Test grid power (+ import / - export)
-    min: -15000
+  # Grid power is a direction plus a size, not one signed slider: a slider
+  # from -15000 to 15000 gives no hint which way is export (SW-3876).
+  # sensor.cala_test_grid_power below combines them into the signed value.
+  cala_test_grid_magnitude_w:
+    name: Test grid power (direction set separately)
+    min: 0
     max: 15000
     step: 50
     initial: 0
@@ -44,6 +47,15 @@ input_number:
     mode: slider
     unit_of_measurement: W
     icon: mdi:home-battery
+
+input_select:
+  cala_test_grid_direction:
+    name: Test grid direction
+    options:
+      - Import
+      - Export
+    initial: Import
+    icon: mdi:swap-horizontal
 
 input_boolean:
   cala_test_grid_connected:
@@ -79,7 +91,8 @@ template:
       - trigger: state
         entity_id:
           - input_number.cala_test_pv_w
-          - input_number.cala_test_grid_w
+          - input_number.cala_test_grid_magnitude_w
+          - input_select.cala_test_grid_direction
           - input_number.cala_test_battery_soc
           - input_number.cala_test_battery_w
           - input_boolean.cala_test_grid_connected
@@ -101,7 +114,10 @@ template:
         device_class: power
         state_class: measurement
         unit_of_measurement: W
-        state: "{{ states('input_number.cala_test_grid_w') | float(0) }}"
+        # + = importing, - = exporting
+        state: >-
+          {% set w = states('input_number.cala_test_grid_magnitude_w') | float(0) -%}
+          {{ 0 - w if is_state('input_select.cala_test_grid_direction', 'Export') else w }}
         availability: "{{ is_state('input_boolean.cala_test_grid_power_available', 'on') }}"
       - name: Cala Test Battery SOC
         unique_id: cala_test_battery_soc
