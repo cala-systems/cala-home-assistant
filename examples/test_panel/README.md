@@ -52,7 +52,8 @@ values.
 | `input_select.cala_test_grid_direction` | Grid direction, `Import` or `Export` |
 | `input_number.cala_test_grid_magnitude_w` | Grid power slider, 0 to 15000 W, in the direction above |
 | `input_number.cala_test_battery_soc` | Battery SOC slider, 0 to 100 % |
-| `input_number.cala_test_battery_w` | Battery power slider, −10000 to 10000 W, positive = charging |
+| `input_select.cala_test_battery_direction` | Battery direction, `Charge` or `Discharge` |
+| `input_number.cala_test_battery_magnitude_w` | Battery power slider, 0 to 10000 W, in the direction above |
 | `input_boolean.cala_test_grid_connected` | Grid connected (on) or off-grid (off) |
 | `input_boolean.cala_test_pv_available` | Off makes the PV sensor `unavailable` |
 | `input_boolean.cala_test_grid_power_available` | Off makes the grid power sensor `unavailable` |
@@ -62,16 +63,18 @@ values.
 | `sensor.cala_test_solar_production` | power, W |
 | `sensor.cala_test_grid_power` | power, W, signed: + importing, − exporting |
 | `sensor.cala_test_battery_soc` | battery, % |
-| `sensor.cala_test_battery_power` | power, W |
+| `sensor.cala_test_battery_power` | power, W, signed: + charging, − discharging |
 | `binary_sensor.cala_test_grid_status` | connectivity, `on` = connected |
 | `sensor.cala_test_last_context` | the last message seen on `cala/+/context` (`ts` as state, payload as attributes) |
 
 Sliders and toggles reset to their initial values (0 W, 50 %, grid direction
-Import, everything on) when Home Assistant restarts.
+Import, battery direction Charge, everything on) when Home Assistant restarts.
 
-To test export, set **Grid direction** to Export and the grid power slider to
-the size of the export. The slider never goes negative; the direction alone
-decides the sign of `sensor.cala_test_grid_power`.
+Grid and battery power are each a direction plus a slider. To test export, set
+**Grid direction** to Export and the grid power slider to the size of the
+export; to test discharge, set **Battery direction** to Discharge the same way.
+The sliders never go negative; the direction alone decides the sign of
+`sensor.cala_test_grid_power` and `sensor.cala_test_battery_power`.
 
 The template sensors are rewritten every 10 s even when nothing moves. That
 advances their `last_reported`, which the integration sends as `ts`, so the
@@ -81,7 +84,7 @@ allow (10 s).
 
 ## Worked example
 
-With PV 6000, grid Export 2500, SOC 95, battery +800 and grid connected on, the
+With PV 6000, grid Export 2500, SOC 95, battery Charge 800 and grid connected on, the
 integration publishes (`ts` is the sensors' `last_reported` in Unix seconds):
 
 <!-- example-payload -->

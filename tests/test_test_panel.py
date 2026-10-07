@@ -134,7 +134,8 @@ EXAMPLE_INPUTS = {
     "input_number.cala_test_grid_magnitude_w": "2500.0",
     "input_select.cala_test_grid_direction": "Export",
     "input_number.cala_test_battery_soc": "95.0",
-    "input_number.cala_test_battery_w": "800.0",
+    "input_number.cala_test_battery_magnitude_w": "800.0",
+    "input_select.cala_test_battery_direction": "Charge",
     "input_boolean.cala_test_grid_connected": "on",
 }
 
@@ -156,6 +157,9 @@ class FakeHass:
         return self._states.get(entity_id)
 
 
+DIRECTION_RE = re.compile(r"\{\{ (.+?) if is_state\('(input_select\.\w+)', '(\w+)'\) else (.+?) \}\}")
+
+
 def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
     """Evaluate the package's templates for the subset of Jinja they use."""
     states = {}
@@ -166,14 +170,17 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
         sources = re.findall(r"input_\w+\.\w+", ent["state"])
         (source,) = [s for s in sources if not s.startswith("input_select.")]
         raw = inputs[source]
+        chosen = DIRECTION_RE.search(ent["state"])
         if entity_id.startswith("binary_sensor."):
             value = "on" if raw == "on" else "off"
+        elif chosen:
+            # {{ A if is_state('input_select.x', 'Option') else B }}, A/B in w, 0 - w, 0
+            then, select, option, otherwise = chosen.groups()
+            pick = then if inputs[select] == option else otherwise
+            w = float(raw)
+            value = str({"w": w, "0 - w": 0 - w, "0": 0.0}[pick])
         else:
-            value = float(raw)
-            for direction in (s for s in sources if s.startswith("input_select.")):
-                if inputs[direction] == "Export":
-                    value = 0 - value
-            value = str(value)
+            value = str(float(raw))
         unit = ent.get("unit_of_measurement")
         states[entity_id] = FakeState(value, {"unit_of_measurement": unit} if unit else {})
     return FakeHass(states)
@@ -187,13 +194,24 @@ def _payload(hass) -> dict | None:
     return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
 
 
-def test_grid_direction_is_a_selector_and_the_power_slider_is_never_negative():
-    (direction,) = PACKAGE["input_select"].values()
-    assert direction["options"] == ["Import", "Export"]
-    assert direction["initial"] == "Import"
-    assert PACKAGE["input_number"]["cala_test_grid_magnitude_w"]["min"] == 0
-    grid_state = TEMPLATES["sensor.cala_test_grid_power"]["state"]
-    assert "is_state('input_select.cala_test_grid_direction', 'Export')" in grid_state
+@pytest.mark.parametrize(
+    "select, options, magnitude, sensor",
+    [
+        ("cala_test_grid_direction", ["Import", "Export"], "cala_test_grid_magnitude_w", "sensor.cala_test_grid_power"),
+        (
+            "cala_test_battery_direction",
+            ["Charge", "Discharge"],
+            "cala_test_battery_magnitude_w",
+            "sensor.cala_test_battery_power",
+        ),
+    ],
+)
+def test_power_direction_is_a_selector_and_the_power_slider_is_never_negative(select, options, magnitude, sensor):
+    direction = PACKAGE["input_select"][select]
+    assert direction["options"] == options
+    assert direction["initial"] == options[0]
+    assert PACKAGE["input_number"][magnitude]["min"] == 0
+    assert DIRECTION_RE.search(TEMPLATES[sensor]["state"]).group(2) == f"input_select.{select}"
 
 
 @pytest.mark.parametrize(
@@ -212,6 +230,24 @@ def test_grid_direction_reaches_the_payload(direction, magnitude, power_w, impor
     assert grid["power_w"] == power_w
     assert grid["importing"] is importing
     assert grid["exporting"] is exporting
+
+
+@pytest.mark.parametrize(
+    "direction, power_w, charging, discharging",
+    [("Charge", 600.0, True, False), ("Discharge", -600.0, False, True)],
+)
+def test_battery_direction_reaches_the_payload(direction, power_w, charging, discharging):
+    inputs = dict(
+        EXAMPLE_INPUTS,
+        **{
+            "input_select.cala_test_battery_direction": direction,
+            "input_number.cala_test_battery_magnitude_w": "600.0",
+        },
+    )
+    battery = _payload(_render(inputs))["context"]["battery"]
+    assert battery["power_w"] == power_w
+    assert battery["charging"] is charging
+    assert battery["discharging"] is discharging
 
 
 def test_readme_worked_example_is_what_the_publisher_sends():
