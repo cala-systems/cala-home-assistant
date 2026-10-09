@@ -107,25 +107,36 @@
         }
       },
       "entities": {
-        "title": "Entity mappings",
+        "title": "Settings",
+        "description": "Cala reads your solar, grid and battery sensors from Home Assistant's Energy dashboard settings (Settings → Dashboards → Energy). Nothing to set up here if your Energy dashboard shows them. The Energy dashboard has no grid-outage sensor, so if you have one (e.g. a Powerwall grid status), pick it below.",
+        "data": {
+          "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)",
+          "grid_status_entity": "Grid status entity (on-grid / off-grid)",
+          "grid_status_invert": "Invert grid status (entity is on during an outage)",
+          "context_publish_interval_s": "Solar/grid/battery publish interval",
+          "manual_context_entities": "Choose solar, grid and battery sensors by hand"
+        },
+        "data_description": {
+          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded.",
+          "context_publish_interval_s": "How often the readings are re-sent to the heater even when nothing changes. Changes are also sent as they happen, at most once every 5 s.",
+          "manual_context_entities": "For testing, or if the Energy dashboard can't describe your system. Leave off to follow the Energy settings."
+        }
+      },
+      "manual_context": {
+        "title": "Solar, grid and battery sensors",
+        "description": "These replace the solar, grid and battery sensors from the Energy settings. The grid status sensor on the previous page still applies.",
         "data": {
           "solar_production_entity": "Solar production entity",
           "grid_power_entity": "Grid power entity (signed, W or kW)",
           "grid_power_sign": "Grid power sign convention",
           "grid_import_entity": "Grid import entity (W or kW; use with grid export instead of a signed grid entity)",
           "grid_export_entity": "Grid export entity (W or kW)",
-          "grid_status_entity": "Grid status entity (on-grid / off-grid)",
-          "grid_status_invert": "Invert grid status (entity is on during an outage)",
           "battery_soc_entity": "Battery state-of-charge entity (0–100 %)",
           "battery_power_entity": "Battery power entity (signed, W or kW)",
-          "battery_power_sign": "Battery power sign convention",
-          "context_publish_interval_s": "Solar/grid/battery publish interval",
-          "tou_rates_entity": "TOU price feed entity (Nord Pool, ENTSO-E, Tibber, OpenADR3)"
+          "battery_power_sign": "Battery power sign convention"
         },
         "data_description": {
-          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair.",
-          "grid_status_entity": "Optional. Tells Cala when the house has lost utility power. A binary sensor reads on = grid connected unless inverted; sensors may report on_grid/off_grid, connected/disconnected or islanded.",
-          "context_publish_interval_s": "How often the readings are re-sent to the heater even when nothing changes. Changes are also sent as they happen, at most once every 5 s."
+          "grid_power_entity": "One signed net-power sensor. Takes precedence over the import/export pair."
         }
       }
     },

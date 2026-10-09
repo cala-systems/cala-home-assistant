@@ -31,20 +31,51 @@ from .const import (
     CONF_GRID_POWER_SIGN,
     CONF_GRID_STATUS_ENTITY,
     CONF_GRID_STATUS_INVERT,
+    CONF_MANUAL_CONTEXT,
     CONF_PUBLISH_INTERVAL,
+    CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_TOU_RATES_ENTITY,
     GRID_POWER_SIGNS,
     GRID_SIGN_POSITIVE_IS_IMPORT,
 )
 from .broker_address import async_default_broker
+from .energy_sources import CONTEXT_SOURCE_KEYS
 from .pairing_request import _http_pair
 from .pairing_errors import ERROR_DEVICE_ERROR, error_placeholders
 
 _LOGGER = logging.getLogger(__name__)
 
+# What a homeowner sees. Solar/grid/battery are read from the Energy settings;
+# grid status (outage) has no Energy equivalent, so it is asked for here.
 OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Optional("solar_production_entity"): EntitySelector(
+        vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["sensor"])
+        ),
+        vol.Optional(CONF_GRID_STATUS_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
+        ),
+        vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
+        vol.Optional(
+            CONF_PUBLISH_INTERVAL, default=DEFAULT_PUBLISH_INTERVAL_S
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=10,
+                max=300,
+                step=5,
+                unit_of_measurement="s",
+                mode=NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Optional(CONF_MANUAL_CONTEXT, default=False): BooleanSelector(),
+    }
+)
+
+# Hand-mapped context entities: testing (the test panel) and setups the Energy
+# settings can't describe. Only shown when CONF_MANUAL_CONTEXT is on.
+MANUAL_CONTEXT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_SOLAR_PRODUCTION_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
         vol.Optional(CONF_GRID_POWER_ENTITY): EntitySelector(
@@ -64,10 +95,6 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_GRID_EXPORT_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
-        vol.Optional(CONF_GRID_STATUS_ENTITY): EntitySelector(
-            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
-        ),
-        vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
         vol.Optional(CONF_BATTERY_SOC_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
@@ -82,20 +109,6 @@ OPTIONS_SCHEMA = vol.Schema(
                 translation_key=CONF_BATTERY_POWER_SIGN,
             )
         ),
-        vol.Optional(
-            CONF_PUBLISH_INTERVAL, default=DEFAULT_PUBLISH_INTERVAL_S
-        ): NumberSelector(
-            NumberSelectorConfig(
-                min=10,
-                max=300,
-                step=5,
-                unit_of_measurement="s",
-                mode=NumberSelectorMode.BOX,
-            )
-        ),
-        vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
-            EntitySelectorConfig(domain=["sensor"])
-        ),
     }
 )
 
@@ -104,7 +117,7 @@ INIT_SCHEMA = vol.Schema(
         vol.Required("next_step", default="entities"): SelectSelector(
             SelectSelectorConfig(
                 options=[
-                    {"value": "entities", "label": "Entity mappings (solar, grid, battery, TOU rates)"},
+                    {"value": "entities", "label": "Settings (TOU price feed, publish interval)"},
                     {"value": "reprovision", "label": "Re-provision device (pairing code, broker, credentials)"},
                 ]
             )
@@ -162,14 +175,13 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         return await self.async_step_entities(None)
 
     async def async_step_entities(self, user_input=None):
-        """Entity mapping options."""
+        """Homeowner settings; solar/grid/battery come from the Energy settings."""
         if user_input is not None:
-            _LOGGER.info(
-                "Cala options saved for %s: %s",
-                self.config_entry.data.get(CONF_DEVICE_ID, "?"),
-                {k: v for k, v in user_input.items() if v},
-            )
-            return self.async_create_entry(data=user_input)
+            if user_input.get(CONF_MANUAL_CONTEXT):
+                self._settings = user_input
+                return await self.async_step_manual_context(None)
+            # Drop any hand-mapped entities so switching back to automatic is clean.
+            return self._save(user_input)
 
         data_schema = self.add_suggested_values_to_schema(
             OPTIONS_SCHEMA, self.config_entry.options
@@ -178,6 +190,28 @@ class CalaOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             step_id="entities",
             data_schema=data_schema,
         )
+
+    async def async_step_manual_context(self, user_input=None):
+        """Hand-mapped solar/grid/battery entities (testing, unusual setups)."""
+        if user_input is not None:
+            return self._save({**self._settings, **user_input})
+
+        current = {
+            k: v for k, v in self.config_entry.options.items() if k in CONTEXT_SOURCE_KEYS
+        }
+        data_schema = self.add_suggested_values_to_schema(MANUAL_CONTEXT_SCHEMA, current)
+        return self.async_show_form(
+            step_id="manual_context",
+            data_schema=data_schema,
+        )
+
+    def _save(self, options: dict):
+        _LOGGER.info(
+            "Cala options saved for %s: %s",
+            self.config_entry.data.get(CONF_DEVICE_ID, "?"),
+            {k: v for k, v in options.items() if v},
+        )
+        return self.async_create_entry(data=options)
 
     async def _default_broker(self, device_host: str | None = None) -> str:
         host = device_host or self.config_entry.data.get(CONF_DEVICE_HOST) or ""

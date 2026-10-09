@@ -53,24 +53,39 @@ sections:
           - entity: input_boolean.cala_test_battery_power_available
             name: Battery power sensor
       - type: entities
-        title: Entities mapped in the Cala options
+        title: Sensors to pick in the Energy settings
         grid_options:
           columns: full
         entities:
           - entity: sensor.cala_test_solar_production
-            name: solar_production_entity
+            name: Solar production power
             secondary_info: last-updated
+          - entity: sensor.cala_test_solar_energy
+            name: Solar production energy
           - entity: sensor.cala_test_grid_power
-            name: grid_power_entity
+            name: Grid power
             secondary_info: last-updated
-          - entity: binary_sensor.cala_test_grid_status
-            name: grid_status_entity
+          - entity: sensor.cala_test_grid_import_energy
+            name: Grid consumption energy
+          - entity: sensor.cala_test_grid_export_energy
+            name: Grid return energy
+          - entity: sensor.cala_test_battery_power
+            name: Battery power
             secondary_info: last-updated
           - entity: sensor.cala_test_battery_soc
-            name: battery_soc_entity
+            name: Battery state of charge
             secondary_info: last-updated
-          - entity: sensor.cala_test_battery_power
-            name: battery_power_entity
+          - entity: sensor.cala_test_battery_discharge_energy
+            name: Energy out of the battery
+          - entity: sensor.cala_test_battery_charge_energy
+            name: Energy into the battery
+      - type: entities
+        title: Sensor to pick in the Cala options (grid status isn't in the Energy settings)
+        grid_options:
+          columns: full
+        entities:
+          - entity: binary_sensor.cala_test_grid_status
+            name: Grid status
             secondary_info: last-updated
 
   - type: grid

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cala import const, publish
+from cala import const, energy_sources, publish
 from cala.sensor import TELEMETRY_FIELDS
 
 PANEL_DIR = Path(__file__).resolve().parents[1] / "examples" / "test_panel"
@@ -42,7 +42,9 @@ PACKAGE_IDS = (
     | {f"input_boolean.{k}" for k in PACKAGE["input_boolean"]}
     | set(TEMPLATES)
     | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["mqtt"]["sensor"]}
+    | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["sensor"]}
 )
+METERS = {f"sensor.{_slug(s['name'])}": s for s in PACKAGE["sensor"]}
 
 
 def _dashboard_entities(node) -> list[str]:
@@ -61,6 +63,11 @@ def _fenced_after(marker: str) -> str:
 
 
 README_OPTIONS = yaml.safe_load(_fenced_after("options"))
+README_ENERGY = yaml.safe_load(_fenced_after("energy"))
+README_GRID_STATUS = yaml.safe_load(_fenced_after("grid-status-option"))
+ENERGY_OPTIONS = energy_sources.effective_context_options(
+    README_GRID_STATUS, energy_sources.mapping_from_energy_prefs(README_ENERGY)
+)
 README_PAYLOAD = json.loads(_fenced_after("example-payload"))
 
 
@@ -113,17 +120,54 @@ def test_triggers_rewrite_on_every_input_and_faster_than_any_publish_interval():
     assert int(pattern["seconds"].lstrip("/")) <= MIN_PUBLISH_INTERVAL_S
 
 
+def test_readme_grid_status_option_is_the_package_binary_sensor():
+    assert README_GRID_STATUS == {const.CONF_GRID_STATUS_ENTITY: "binary_sensor.cala_test_grid_status"}
+    assert const.CONF_GRID_STATUS_ENTITY not in energy_sources.CONTEXT_SOURCE_KEYS
+
+
 def test_readme_options_are_real_option_names_and_values():
     allowed_signs = {
         const.CONF_GRID_POWER_SIGN: const.GRID_POWER_SIGNS,
         const.CONF_BATTERY_POWER_SIGN: const.BATTERY_POWER_SIGNS,
     }
+    assert README_OPTIONS.get(const.CONF_MANUAL_CONTEXT) is True
+    assert const.CONF_GRID_STATUS_ENTITY not in README_OPTIONS
     for key, value in README_OPTIONS.items():
+        if key == const.CONF_MANUAL_CONTEXT:
+            continue
         if key in allowed_signs:
             assert value in allowed_signs[key]
         else:
-            assert key in publish.CONTEXT_ENTITY_KEYS
+            assert key in energy_sources.CONTEXT_SOURCE_KEYS
             assert value in TEMPLATES
+
+
+def test_readme_energy_settings_name_package_sensors():
+    named = {
+        v for source in README_ENERGY["energy_sources"]
+        for k, v in source.items() if k.startswith("stat_")
+    }
+    assert named <= PACKAGE_IDS
+
+
+def test_energy_settings_plus_grid_status_option_cover_every_test_sensor():
+    mapped = set(publish.context_entity_ids(ENERGY_OPTIONS))
+    assert mapped == {
+        "sensor.cala_test_solar_production",
+        "sensor.cala_test_grid_power",
+        "sensor.cala_test_battery_power",
+        "sensor.cala_test_battery_soc",
+        "binary_sensor.cala_test_grid_status",
+    }
+
+
+def test_kwh_meters_integrate_the_matching_power_sensor():
+    for meter_id, meter in METERS.items():
+        assert meter["platform"] == "integration"
+        assert meter["unit_prefix"] == "k"
+        source = meter["source"]
+        assert source in TEMPLATES, meter_id
+        assert meter_id.removesuffix("_energy") == source.removesuffix("_power").removesuffix("_production")
 
 
 # ---- The worked example, through the real publisher ----
@@ -186,9 +230,9 @@ def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
     return FakeHass(states)
 
 
-def _payload(hass) -> dict | None:
-    ctx = publish.build_context(hass, README_OPTIONS)
-    ts = publish._source_ts(hass, README_OPTIONS)
+def _payload(hass, opts=ENERGY_OPTIONS) -> dict | None:
+    ctx = publish.build_context(hass, opts)
+    ts = publish._source_ts(hass, opts)
     if not ctx or ts is None:
         return None
     return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
@@ -226,7 +270,10 @@ def test_grid_direction_reaches_the_payload(direction, magnitude, power_w, impor
             "input_number.cala_test_grid_magnitude_w": magnitude,
         },
     )
-    grid = _payload(_render(inputs))["context"]["grid"]
+    hass = _render(inputs)
+    assert float(hass.get("sensor.cala_test_grid_import_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_grid_export_power").state) == max(-power_w, 0.0)
+    grid = _payload(hass, ENERGY_OPTIONS)["context"]["grid"]
     assert grid["power_w"] == power_w
     assert grid["importing"] is importing
     assert grid["exporting"] is exporting
@@ -244,14 +291,38 @@ def test_battery_direction_reaches_the_payload(direction, power_w, charging, dis
             "input_number.cala_test_battery_magnitude_w": "600.0",
         },
     )
-    battery = _payload(_render(inputs))["context"]["battery"]
+    hass = _render(inputs)
+    # HA's sign on the sensor (+ = discharging); the heater's sign in the payload.
+    assert float(hass.get("sensor.cala_test_battery_power").state) == -power_w
+    assert float(hass.get("sensor.cala_test_battery_charge_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_battery_discharge_power").state) == max(-power_w, 0.0)
+    battery = _payload(hass, ENERGY_OPTIONS)["context"]["battery"]
+    assert battery == _payload(hass, README_OPTIONS)["context"]["battery"]
     assert battery["power_w"] == power_w
     assert battery["charging"] is charging
     assert battery["discharging"] is discharging
 
 
 def test_readme_worked_example_is_what_the_publisher_sends():
-    assert _payload(_render(EXAMPLE_INPUTS)) == README_PAYLOAD
+    assert _payload(_render(EXAMPLE_INPUTS), ENERGY_OPTIONS) == README_PAYLOAD
+
+
+def test_hand_mapped_example_sends_the_same_payload():
+    hand_mapped = {**README_OPTIONS, **README_GRID_STATUS}
+    assert _payload(_render(EXAMPLE_INPUTS), hand_mapped) == README_PAYLOAD
+
+
+def test_without_a_grid_status_option_grid_disconnected_is_left_out():
+    opts = {k: v for k, v in ENERGY_OPTIONS.items() if k != const.CONF_GRID_STATUS_ENTITY}
+    grid = _payload(_render(EXAMPLE_INPUTS), opts)["context"]["grid"]
+    assert "grid_disconnected" not in grid
+
+
+def test_energy_path_keeps_only_grid_status_when_grid_power_is_unavailable():
+    hass = _render(EXAMPLE_INPUTS, {"sensor.cala_test_grid_power"})
+    assert _payload(hass, ENERGY_OPTIONS)["context"]["grid"] == {"grid_disconnected": False}
+    without_status = {k: v for k, v in ENERGY_OPTIONS.items() if k != const.CONF_GRID_STATUS_ENTITY}
+    assert "grid" not in _payload(hass, without_status)["context"]
 
 
 @pytest.mark.parametrize(

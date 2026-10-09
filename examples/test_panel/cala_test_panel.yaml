@@ -5,7 +5,10 @@
 #     packages:
 #       cala_test_panel: !include packages/cala_test_panel.yaml
 #
-# See README.md in this folder for the option mapping.
+# The sensors behave like a stock HA install's: power in W with HA's Energy
+# sign conventions (grid + = importing, battery + = discharging) plus kWh
+# meters, so they can be picked in Settings -> Dashboards -> Energy exactly as
+# a homeowner would. See README.md in this folder.
 
 input_number:
   cala_test_pv_w:
@@ -140,10 +143,48 @@ template:
         device_class: power
         state_class: measurement
         unit_of_measurement: W
-        # + = charging, - = discharging
+        # HA convention: + = discharging, - = charging
         state: >-
           {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
-          {{ 0 - w if is_state('input_select.cala_test_battery_direction', 'Discharge') else w }}
+          {{ 0 - w if is_state('input_select.cala_test_battery_direction', 'Charge') else w }}
+        availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
+      # Directional power for the kWh meters below. Energy wants import/export
+      # and charge/discharge energy as separate, always-positive meters.
+      - name: Cala Test Grid Import Power
+        unique_id: cala_test_grid_import_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: >-
+          {% set w = states('input_number.cala_test_grid_magnitude_w') | float(0) -%}
+          {{ 0 if is_state('input_select.cala_test_grid_direction', 'Export') else w }}
+        availability: "{{ is_state('input_boolean.cala_test_grid_power_available', 'on') }}"
+      - name: Cala Test Grid Export Power
+        unique_id: cala_test_grid_export_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: >-
+          {% set w = states('input_number.cala_test_grid_magnitude_w') | float(0) -%}
+          {{ w if is_state('input_select.cala_test_grid_direction', 'Export') else 0 }}
+        availability: "{{ is_state('input_boolean.cala_test_grid_power_available', 'on') }}"
+      - name: Cala Test Battery Discharge Power
+        unique_id: cala_test_battery_discharge_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: >-
+          {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
+          {{ w if is_state('input_select.cala_test_battery_direction', 'Discharge') else 0 }}
+        availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
+      - name: Cala Test Battery Charge Power
+        unique_id: cala_test_battery_charge_power
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: W
+        state: >-
+          {% set w = states('input_number.cala_test_battery_magnitude_w') | float(0) -%}
+          {{ w if is_state('input_select.cala_test_battery_direction', 'Charge') else 0 }}
         availability: "{{ is_state('input_boolean.cala_test_battery_power_available', 'on') }}"
     binary_sensor:
       - name: Cala Test Grid Status
@@ -151,6 +192,44 @@ template:
         device_class: connectivity
         state: "{{ is_state('input_boolean.cala_test_grid_connected', 'on') }}"
         availability: "{{ is_state('input_boolean.cala_test_grid_status_available', 'on') }}"
+
+# kWh meters (Riemann sums of the power sensors) for the Energy settings.
+sensor:
+  - platform: integration
+    name: Cala Test Solar Energy
+    unique_id: cala_test_solar_energy
+    source: sensor.cala_test_solar_production
+    unit_prefix: k
+    method: left
+    round: 3
+  - platform: integration
+    name: Cala Test Grid Import Energy
+    unique_id: cala_test_grid_import_energy
+    source: sensor.cala_test_grid_import_power
+    unit_prefix: k
+    method: left
+    round: 3
+  - platform: integration
+    name: Cala Test Grid Export Energy
+    unique_id: cala_test_grid_export_energy
+    source: sensor.cala_test_grid_export_power
+    unit_prefix: k
+    method: left
+    round: 3
+  - platform: integration
+    name: Cala Test Battery Discharge Energy
+    unique_id: cala_test_battery_discharge_energy
+    source: sensor.cala_test_battery_discharge_power
+    unit_prefix: k
+    method: left
+    round: 3
+  - platform: integration
+    name: Cala Test Battery Charge Energy
+    unique_id: cala_test_battery_charge_energy
+    source: sensor.cala_test_battery_charge_power
+    unit_prefix: k
+    method: left
+    round: 3
 
 # Echo of what actually went out on cala/<device_id>/context, read back from
 # the broker. Not part of the integration; with several Cala devices it shows
