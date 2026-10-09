@@ -45,9 +45,9 @@ Energy settings, with nothing configured in the Cala options.
    | | Battery power (standard, not inverted) | `sensor.cala_test_battery_power` |
    | | State of charge (newer HA versions only) | `sensor.cala_test_battery_soc` |
 
-   Leave the Cala options alone: **Choose solar, grid and battery sensors by
-   hand** stays off. Saving the Energy settings reloads Cala, and its log
-   shows `Cala context sources (from Energy settings): [...]`.
+   Leave **Choose solar, grid and battery sensors by hand** off. Saving the
+   Energy settings reloads Cala, and its log shows
+   `Cala context sources (from Energy settings): [...]`.
 
    The same settings as Home Assistant stores them (`.storage/energy`):
 
@@ -68,15 +68,26 @@ Energy settings, with nothing configured in the Cala options.
        stat_soc: sensor.cala_test_battery_soc
    ```
 
-4. **Set a solar policy on the heater in the Cala app.** Without one the
+4. **Pick the grid status sensor in the Cala options.** The Energy settings
+   have no grid-status (outage) sensor, so this one is a plain Cala option:
+   Settings → Devices & services → Cala → Configure → Settings, set
+   **Grid status entity (on-grid / off-grid)** to **Cala Test Grid Status**
+   and leave **Invert grid status** off. Solar, grid and battery keep coming
+   from the Energy settings.
+
+   <!-- grid-status-option -->
+   ```yaml
+   grid_status_entity: binary_sensor.cala_test_grid_status
+   ```
+
+5. **Set a solar policy on the heater in the Cala app.** Without one the
    firmware ignores the context and nothing will change on the heater.
 
-### Testing grid status (hand-mapped)
+### Hand-mapping the power sensors instead
 
-The Energy settings have no grid-status (outage) sensor, so testing
-`grid_disconnected` still needs the hand-mapped override: Settings → Devices &
-services → Cala → Configure → Settings, turn on **Choose solar, grid and
-battery sensors by hand**, submit, then on the next page:
+If you'd rather not touch the Energy settings, turn on **Choose solar, grid
+and battery sensors by hand** on the Settings page, submit, then on the next
+page:
 
 <!-- options -->
 ```yaml
@@ -84,15 +95,14 @@ manual_context_entities: true
 solar_production_entity: sensor.cala_test_solar_production
 grid_power_entity: sensor.cala_test_grid_power
 grid_power_sign: positive_is_import
-grid_status_entity: binary_sensor.cala_test_grid_status
 battery_soc_entity: sensor.cala_test_battery_soc
 battery_power_entity: sensor.cala_test_battery_power
 battery_power_sign: positive_is_discharging
 ```
 
-Leave grid import / grid export empty and grid status invert off. While the
-toggle is on, the Energy settings are ignored; turn it off again when you're
-done.
+Leave grid import / grid export empty. The grid status entity from the
+Settings page still applies. While the toggle is on, the Energy settings are
+ignored; turn it off again when you're done.
 
 ## What the package creates
 
@@ -142,8 +152,9 @@ allow (10 s).
 
 ## Worked example
 
-With PV 6000, grid Export 2500, SOC 95 and battery Charge 800, the
-integration publishes (`ts` is the sensors' `last_reported` in Unix seconds):
+With PV 6000, grid Export 2500, SOC 95, battery Charge 800 and grid connected
+on, the integration publishes (`ts` is the sensors' `last_reported` in Unix
+seconds):
 
 <!-- example-payload -->
 ```json
@@ -152,15 +163,15 @@ integration publishes (`ts` is the sensors' `last_reported` in Unix seconds):
   "ts": 1790856000.0,
   "context": {
     "solar": {"production_w": 6000.0, "producing": true},
-    "grid": {"import_w": 0.0, "export_w": 2500.0, "power_w": -2500.0, "exporting": true, "importing": false},
+    "grid": {"import_w": 0.0, "export_w": 2500.0, "power_w": -2500.0, "exporting": true, "importing": false, "grid_disconnected": false},
     "battery": {"soc_percent": 95.0, "power_w": 800.0, "charging": true, "discharging": false}
   }
 }
 ```
 
 The heater's payload uses its own convention, battery `power_w` positive when
-charging; the integration converts from HA's. With the hand-mapped grid status,
-`grid` also carries `"grid_disconnected": false`.
+charging; the integration converts from HA's. Without a grid status entity in
+the Cala options, `grid_disconnected` is left out.
 
 Watch it on the broker:
 

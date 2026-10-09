@@ -21,8 +21,6 @@ from .const import (
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_GRID_POWER_SIGN,
-    CONF_GRID_STATUS_ENTITY,
-    CONF_GRID_STATUS_INVERT,
     CONF_MANUAL_CONTEXT,
     CONF_SOLAR_PRODUCTION_ENTITY,
     DOMAIN,
@@ -31,16 +29,16 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Option keys that describe where the context comes from. In automatic mode
-# these are replaced wholesale by the Energy-derived mapping.
+# Option keys that describe where the power readings come from. In automatic
+# mode these are replaced wholesale by the Energy-derived mapping. The grid
+# status (outage) sensor is not among them: the Energy settings have no such
+# sensor, so it is a plain option that applies in both modes.
 CONTEXT_SOURCE_KEYS = (
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_GRID_POWER_SIGN,
     CONF_GRID_IMPORT_ENTITY,
     CONF_GRID_EXPORT_ENTITY,
-    CONF_GRID_STATUS_ENTITY,
-    CONF_GRID_STATUS_INVERT,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BATTERY_POWER_ENTITY,
     CONF_BATTERY_POWER_SIGN,
@@ -95,7 +93,10 @@ def mapping_from_energy_prefs(prefs: dict | None) -> dict:
 
 
 def effective_context_options(opts: dict, energy_mapping: dict) -> dict:
-    """The options the publisher should use: hand-mapped if asked for, else from Energy."""
+    """The options the publisher should use: hand-mapped if asked for, else from Energy.
+
+    Grid status is kept either way; it is never part of the Energy mapping.
+    """
     if opts.get(CONF_MANUAL_CONTEXT):
         return dict(opts)
     auto = {k: v for k, v in opts.items() if k not in CONTEXT_SOURCE_KEYS}

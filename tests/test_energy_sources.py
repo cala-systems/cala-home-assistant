@@ -153,9 +153,10 @@ def test_first_of_several_solar_sources_is_used():
 
 # ---- Automatic vs hand-mapped ----
 
-def test_automatic_mode_ignores_stale_hand_mapping():
+def test_automatic_mode_ignores_stale_hand_mapping_but_keeps_grid_status():
     opts = {
         "solar_production_entity": "sensor.power_production_now",
+        "grid_power_entity": "sensor.old_grid",
         "grid_status_entity": "binary_sensor.x",
         "grid_status_invert": True,
         "context_publish_interval_s": 30.0,
@@ -165,8 +166,15 @@ def test_automatic_mode_ignores_stale_hand_mapping():
     assert energy_sources.effective_context_options(opts, mapping) == {
         "context_publish_interval_s": 30.0,
         "tou_rates_entity": "sensor.nordpool",
+        "grid_status_entity": "binary_sensor.x",
+        "grid_status_invert": True,
         "solar_production_entity": "sensor.envoy_202325045900_current_power_production",
     }
+
+
+def test_grid_status_is_not_an_energy_source_key():
+    assert "grid_status_entity" not in energy_sources.CONTEXT_SOURCE_KEYS
+    assert "grid_status_invert" not in energy_sources.CONTEXT_SOURCE_KEYS
 
 
 def test_manual_mode_keeps_hand_mapping_and_ignores_energy():
@@ -209,6 +217,35 @@ def test_energy_settings_publish_with_normalised_signs(monkeypatch):
         "battery": {"soc_percent": 95.0, "power_w": 800.0, "charging": True,
                     "discharging": False},
     }
+
+
+def test_energy_settings_plus_grid_status_option_publish_grid_disconnected(monkeypatch):
+    calls = []
+
+    async def async_publish(hass, topic, payload, qos=0, retain=False):
+        calls.append(json.loads(payload))
+
+    monkeypatch.setattr(publish.mqtt, "async_publish", async_publish, raising=False)
+
+    hass = FakeHass({
+        "sensor.pv_w": w(6000),
+        "sensor.grid_w": w(-2.5, "kW"),
+        "sensor.batt_w": w(-800),
+        "sensor.batt_soc": FakeState("95", {"unit_of_measurement": "%"}),
+        "binary_sensor.powerwall_grid_status": FakeState("off"),
+    })
+    # Grid status is a plain option; solar/grid/battery still come from Energy.
+    entry = FakeEntry({"grid_status_entity": "binary_sensor.powerwall_grid_status"})
+    opts = energy_sources.effective_context_options(
+        entry.options, energy_sources.mapping_from_energy_prefs(FULL_PREFS)
+    )
+    asyncio.run(publish.publish_context(hass, entry, opts))
+
+    assert calls[0]["context"]["grid"] == {
+        "import_w": 0.0, "export_w": 2500.0, "power_w": -2500.0,
+        "exporting": True, "importing": False, "grid_disconnected": True,
+    }
+    assert calls[0]["context"]["solar"]["production_w"] == 6000.0
 
 
 # ---- Reacting to Energy settings changes ----

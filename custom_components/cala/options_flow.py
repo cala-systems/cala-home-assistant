@@ -45,12 +45,17 @@ from .pairing_errors import ERROR_DEVICE_ERROR, error_placeholders
 
 _LOGGER = logging.getLogger(__name__)
 
-# What a homeowner sees. Solar/grid/battery are read from the Energy settings.
+# What a homeowner sees. Solar/grid/battery are read from the Energy settings;
+# grid status (outage) has no Energy equivalent, so it is asked for here.
 OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_TOU_RATES_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor"])
         ),
+        vol.Optional(CONF_GRID_STATUS_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
+        ),
+        vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
         vol.Optional(
             CONF_PUBLISH_INTERVAL, default=DEFAULT_PUBLISH_INTERVAL_S
         ): NumberSelector(
@@ -90,10 +95,6 @@ MANUAL_CONTEXT_SCHEMA = vol.Schema(
         vol.Optional(CONF_GRID_EXPORT_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
-        vol.Optional(CONF_GRID_STATUS_ENTITY): EntitySelector(
-            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
-        ),
-        vol.Optional(CONF_GRID_STATUS_INVERT, default=False): BooleanSelector(),
         vol.Optional(CONF_BATTERY_SOC_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["sensor", "input_number"])
         ),
