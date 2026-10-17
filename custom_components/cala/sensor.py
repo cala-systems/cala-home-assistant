@@ -242,8 +242,6 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
         # because HA assumes they are numeric and will throw on async_write_ha_state error.
         if key in ("fw_version", "wifi_ip", "wifi_ssid"):
             self._attr_state_class = None
-        elif key in ("energy_used_kwh", "gallons_used"):
-            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         else:
             self._attr_state_class = meta.get("state_class")
 
