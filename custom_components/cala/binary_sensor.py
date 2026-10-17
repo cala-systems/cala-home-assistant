@@ -32,6 +32,7 @@ from .const import (
     SIGNAL_PAYLOAD,
 )
 from .entity import CalaBase
+from .helpers import write_state_if_added
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ async def async_setup_entry(
         for b in binaries:
             try:
                 b.update_from_payload(payload)
-                b.async_write_ha_state()
+                write_state_if_added(b)
             except Exception:
                 _LOGGER.exception("Error updating binary sensor %s", b._key)
 
@@ -122,7 +123,7 @@ async def async_setup_entry(
     def _on_availability(available: bool) -> None:
         for b in binaries:
             b._attr_available = available
-            b.async_write_ha_state()
+            write_state_if_added(b)
 
     entry.async_on_unload(
         async_dispatcher_connect(

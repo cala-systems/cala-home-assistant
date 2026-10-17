@@ -10,7 +10,11 @@ from homeassistant.helpers.entity_registry import (
     async_get as async_get_entity_registry,
 )
 from .const import ATTR_DEVICE_ID, DOMAIN
-from .helpers import get_command_topic, publish_command_and_wait_response
+from .helpers import (
+    get_command_topic,
+    publish_command_and_wait_response,
+    write_state_if_added,
+)
 
 BOOST_UNIQUE_ID_SUFFIX = "_boost_mode_on"
 
@@ -39,7 +43,7 @@ async def _execute_boost_command(
     boost_entity = (hass.data.get(DOMAIN) or {}).get("boost_entities", {}).get(device_id)
     if boost_entity:
         boost_entity._attr_is_on = boost_state == "on"
-        boost_entity.async_write_ha_state()
+        write_state_if_added(boost_entity)
     else:
         boost_entity_id = get_boost_entity_id(hass, device_id)
         if boost_entity_id:

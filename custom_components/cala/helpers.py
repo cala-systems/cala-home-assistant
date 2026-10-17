@@ -10,6 +10,15 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import CONF_COMMAND_TOPIC, CONF_DEVICE_ID, DOMAIN
 
 
+def write_state_if_added(entity) -> None:
+    """Write state only once HA has added the entity.
+
+    Disabled entities are never added, so their hass stays None and a write raises.
+    """
+    if entity.hass is not None:
+        entity.async_write_ha_state()
+
+
 def get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
     """Resolve command topic for device_id from config entries."""
     for entry in hass.config_entries.async_entries(DOMAIN):
