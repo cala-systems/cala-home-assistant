@@ -568,16 +568,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 hass,
                 DOMAIN,
                 _repair_issue_id(),
-                is_fixable=True,
+                is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
-                translation_key=None,
-                title=f"Cala device {device_id} appears offline",
-                description=(
-                    "Your Cala device has been offline for an extended period.\n\n"
-                    "If the device was reset or re-paired, you likely need to re-provision it.\n\n"
-                    "Go to: Settings → Devices & services → Cala → Configure → "
-                    "Re-provision device (pairing code, broker, credentials)."
-                ),
+                translation_key="offline_prolonged",
+                translation_placeholders={"device_id": device_id},
             )
         except Exception:
             _LOGGER.exception("Failed to create repair issue for %s", device_id)

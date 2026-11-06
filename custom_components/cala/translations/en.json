@@ -166,5 +166,11 @@
         "positive_is_discharging": "Positive = discharging"
       }
     }
+  },
+  "issues": {
+    "offline_prolonged": {
+      "title": "Cala device {device_id} appears offline",
+      "description": "Your Cala device has been offline for an extended period.\n\nIf the device was reset or re-paired, you likely need to re-provision it.\n\nGo to: Settings → Devices & services → Cala → Configure → Re-provision device (pairing code, broker, credentials)."
+    }
   }
 }
