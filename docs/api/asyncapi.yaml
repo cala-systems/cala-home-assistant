@@ -4,7 +4,8 @@ asyncapi: 3.0.0
 # Cala heat pump water heater — local MQTT API
 #
 # Reverse-documented from the open-source Home Assistant integration
-# (https://github.com/cala-systems/cala-home-assistant, v0.4.0) and checked
+# (https://github.com/cala-systems/cala-home-assistant, v0.4.0; `context`
+# updated to v0.5.0) and checked
 # against live broker traffic from a production heater running firmware
 # v8.4.1. Message shapes and timing marked "observed" were seen on the wire;
 # the *semantics* of each field (computed vs. sensed, sampling window) are
@@ -14,7 +15,7 @@ asyncapi: 3.0.0
 
 info:
   title: Cala Water Heater Local MQTT API
-  version: 0.4.0-draft
+  version: 0.5.0-draft
   description: |
     Local, LAN-only message interface between a Cala heat pump water heater
     and a home automation controller (Home Assistant today), carried over an
@@ -43,7 +44,7 @@ info:
     | Telemetry / state             | `cala/{deviceId}/state`                 | heater → ctrl    |
     | Commands                      | `cala/{deviceId}/command`               | ctrl → heater    |
     | Command acknowledgements      | `cala/{deviceId}/command/response`      | heater → ctrl    |
-    | Energy context (solar/battery)| `cala/{deviceId}/context`               | ctrl → heater    |
+    | Energy context (solar/grid/battery)| `cala/{deviceId}/context`          | ctrl → heater    |
     | Availability                  | `cala/{deviceId}/availability`          | heater → ctrl    |
 
     `{deviceId}` is the device serial as printed on the heater and advertised
@@ -228,13 +229,23 @@ channels:
   context:
     address: 'cala/{deviceId}/context'
     title: Energy context
-    summary: Site-level solar production and battery state supplied to the heater.
+    summary: Site-level solar, grid and battery state supplied to the heater.
     description: |
-      Optional. If the homeowner links solar / battery entities in the
-      integration options, the controller publishes this whenever one of them
-      changes state. Only fields with valid data are included; the message is
-      not sent at all if nothing valid is available. How the heater uses this
-      (e.g. to prefer heating during solar surplus) is UNCONFIRMED.
+      Optional. Sources come from Home Assistant's Energy settings, or from
+      entities the homeowner maps by hand in the integration options; a grid
+      status (on-grid / off-grid) entity can be added either way. The
+      controller publishes:
+
+      * once at startup,
+      * on every state change of a source entity, rate-limited to at most
+        once every 5 s (a change inside the window is sent when it ends),
+      * and on a fixed interval (default 30 s, configurable) even when
+        nothing changed.
+
+      Only objects and fields with valid data are included (unavailable or
+      unknown sources are omitted, never sent as zero); the message is not
+      sent at all if nothing valid is available. Advisory only: the heater
+      stays in control. How the heater uses each field is UNCONFIRMED.
     parameters:
       deviceId:
         $ref: '#/components/parameters/deviceId'
@@ -483,22 +494,41 @@ components:
       payload:
         $ref: '#/components/schemas/EnergyContext'
       examples:
-        - name: solar and battery
+        - name: solar, grid and battery
           payload:
-            v: 1
-            ts: 1757548800.123
+            v: 2
+            ts: 1762444800.123
             context:
               solar:
-                production_w: 3120.5
+                production_w: 5230.0
+                producing: true
+              grid:
+                import_w: 0.0
+                export_w: 3100.0
+                power_w: -3100.0
+                exporting: true
+                importing: false
+                grid_disconnected: false
               battery:
-                soc: 0.7325
-        - name: solar only
+                soc_percent: 87.0
+                power_w: 1200.0
+                charging: true
+                discharging: false
+        - name: solar only, night
           payload:
-            v: 1
-            ts: 1757548860.001
+            v: 2
+            ts: 1762477200.5
             context:
               solar:
-                production_w: 0
+                production_w: 0.0
+                producing: false
+        - name: grid outage, status entity only
+          payload:
+            v: 2
+            ts: 1762480000.0
+            context:
+              grid:
+                grid_disconnected: true
 
     availability:
       name: availability
@@ -809,20 +839,28 @@ components:
       properties:
         v:
           type: integer
-          const: 1
-          description: Envelope version.
+          const: 2
+          description: >-
+            Envelope version. v1 (integration ≤ v0.4.0) carried only
+            `solar.production_w` and `battery.soc` (0–1 fraction), published on
+            change only, with `ts` = send time.
         ts:
           type: number
-          description: Unix time of publication, seconds (fractional), UTC.
+          description: >-
+            Unix time, seconds (fractional), UTC: the most recent time Home
+            Assistant heard from any available source entity (`last_reported`,
+            else `last_updated`), not the send time. A steady sensor keeps
+            advancing `ts`; a frozen one does not, so the heater can tell them
+            apart.
         context:
           type: object
-          description: At least one of `solar` or `battery` is present.
+          description: At least one of `solar`, `grid` or `battery` is present.
           minProperties: 1
           additionalProperties: false
           properties:
             solar:
               type: object
-              required: [production_w]
+              required: [production_w, producing]
               additionalProperties: false
               properties:
                 production_w:
@@ -830,13 +868,74 @@ components:
                   minimum: 0
                   maximum: 100000
                   description: Instantaneous site PV production, watts (rounded to 0.01).
-            battery:
+                producing:
+                  type: boolean
+                  description: '`production_w > 0`.'
+            grid:
               type: object
-              required: [soc]
+              description: >-
+                Power fields appear together (from one signed grid-power entity,
+                or an import/export pair); `grid_disconnected` appears only when
+                a grid status entity is mapped and readable. Either group may be
+                present without the other.
+              minProperties: 1
               additionalProperties: false
+              dependentRequired:
+                power_w: [import_w, export_w, exporting, importing]
               properties:
-                soc:
+                import_w:
                   type: number
                   minimum: 0
-                  maximum: 1
-                  description: Home battery state of charge as a fraction 0.0–1.0 (rounded to 4 dp).
+                  maximum: 100000
+                  description: Power drawn from the utility, watts (0 while exporting).
+                export_w:
+                  type: number
+                  minimum: 0
+                  maximum: 100000
+                  description: Power sent to the utility, watts (0 while importing).
+                power_w:
+                  type: number
+                  minimum: -100000
+                  maximum: 100000
+                  description: >-
+                    Net grid power, watts: positive = importing, negative =
+                    exporting (`import_w - export_w`). The controller normalises
+                    the source sensor's sign convention to this.
+                exporting:
+                  type: boolean
+                  description: '`export_w > 0`.'
+                importing:
+                  type: boolean
+                  description: '`import_w > 0`.'
+                grid_disconnected:
+                  type: boolean
+                  description: >-
+                    true = utility power lost (house islanded / off-grid),
+                    false = on-grid.
+            battery:
+              type: object
+              description: Each field is present only if its source entity is mapped and valid.
+              minProperties: 1
+              additionalProperties: false
+              dependentRequired:
+                power_w: [charging, discharging]
+              properties:
+                soc_percent:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                  description: Home battery state of charge, percent 0–100 (rounded to 0.01).
+                power_w:
+                  type: number
+                  minimum: -100000
+                  maximum: 100000
+                  description: >-
+                    Battery power, watts: positive = charging, negative =
+                    discharging. The controller normalises the source sensor's
+                    sign convention to this.
+                charging:
+                  type: boolean
+                  description: '`power_w > 0`.'
+                discharging:
+                  type: boolean
+                  description: '`power_w < 0`.'
