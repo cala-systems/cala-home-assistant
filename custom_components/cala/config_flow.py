@@ -211,7 +211,11 @@ class CalaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             mqtt_password,
         )
 
-        _LOGGER.debug("Provision result err=%s data_type=%s data=%s", err, type(data), data)
+        _LOGGER.debug(
+            "Provision result err=%s keys=%s",
+            err,
+            sorted(data) if isinstance(data, dict) else type(data).__name__,
+        )
 
         if err is not None:
             _LOGGER.warning(
