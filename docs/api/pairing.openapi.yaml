@@ -1,0 +1,309 @@
+openapi: 3.1.0
+
+# ---------------------------------------------------------------------------
+# Cala heat pump water heater — local pairing (provisioning) endpoint
+#
+# Companion to cala-local-api.asyncapi.yaml. Reverse-documented from the
+# open-source Home Assistant integration
+# (https://github.com/cala-systems/cala-home-assistant, v0.4.0,
+# pairing_request.py / pairing_errors.py / config_flow.py). Items marked
+# UNCONFIRMED are inferred from the client and should be checked against the
+# firmware (embESP32 HomeAssistantWebServer.hpp per the integration's notes).
+# ---------------------------------------------------------------------------
+
+info:
+  title: Cala Water Heater Local Pairing API
+  version: 0.4.0-draft
+  summary: One-shot HTTP endpoint that hands a Cala heater its MQTT broker settings.
+  description: |
+    The heater runs a small HTTP server on the LAN **only while its screen is
+    on *Settings → Advanced → Home Assistant***. That screen also shows a
+    short-lived **pairing code**. A controller (Home Assistant today) uses
+    the code to encrypt a one-time provisioning request that tells the
+    heater which MQTT broker to connect to and with which credentials. Once
+    accepted, all further communication is over MQTT — see the AsyncAPI
+    document.
+
+    ## Discovery
+
+    The heater advertises the service via mDNS/Zeroconf as
+    `_cala._tcp.local.`. The TXT record carries `device_id=<deviceId>`
+    (the integration also accepts `id`). Host and port come from the SRV
+    record; port 80 is the default when nothing is advertised.
+
+    ## Request encryption
+
+    The request body is a JSON object with a single `encrypted` field. Its
+    value is Base64 of `IV || ciphertext` where:
+
+    * `key        = SHA-256(pairing_code as UTF-8)[0:16]` (AES-128)
+    * `IV`        = 16 random bytes, prepended in clear
+    * `ciphertext = AES-128-CBC(key, IV, PKCS7-pad(JSON plaintext))`
+
+    The plaintext is the `PairingRequest` schema below. Nothing else about
+    the request is authenticated; the pairing code is the shared secret.
+    UNCONFIRMED: code lifetime, whether a code can be reused, and whether
+    the endpoint rate-limits failed attempts.
+
+    ## Choosing the broker address
+
+    The heater connects to exactly the `mqtt_broker.host` it is given, so it
+    must be an address reachable from the heater's LAN — the integration
+    goes to some trouble to pick the controller's adapter address on the
+    heater's own subnet rather than a container-network address.
+
+  contact:
+    name: Cala Systems
+    url: https://github.com/cala-systems/cala-home-assistant/issues
+  x-asyncapi-companion: ./asyncapi.yaml
+
+externalDocs:
+  description: Home Assistant integration source (reference implementation)
+  url: https://github.com/cala-systems/cala-home-assistant
+
+servers:
+  - url: 'http://{heaterHost}:{port}'
+    description: The heater itself, on the LAN, while the pairing screen is open.
+    variables:
+      heaterHost:
+        description: IPv4 address or mDNS host of the heater (from the `_cala._tcp.local.` SRV record).
+        default: '192.168.1.50'
+      port:
+        default: '80'
+
+paths:
+  /pair:
+    post:
+      operationId: pairDevice
+      summary: Provision MQTT broker settings into the heater
+      description: |
+        Decrypts the request with the current pairing code, checks that the
+        `device_id` inside matches the heater, stores the broker settings,
+        and returns the MQTT credentials / topic layout the heater will use.
+
+        The reference client uses a 30 s overall timeout and 10 s
+        connect/read timeouts; the heater has been seen to answer without
+        closing the connection, so clients should bound their reads.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedEnvelope'
+            examples:
+              request:
+                summary: Encrypted envelope (Base64 shortened)
+                value:
+                  encrypted: 'q1Z7c2xXbK0v8cPZ6iN1sQ==…'
+      responses:
+        '200':
+          description: |
+            Pairing accepted. The body is a JSON object; the reference client
+            treats the request as accepted if **any** of the following holds:
+            `accepted: true`, `status: "accepted"`, or MQTT credentials /
+            topic data are present. The observed shape from a production
+            heater (per the integration's test fixture) is the `mqtt` object
+            alone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairingResponse'
+              examples:
+                observed:
+                  summary: Shape the reference client is tested against
+                  value:
+                    mqtt:
+                      username: cala
+                      password: '…'
+                      topic_prefix: cala/260720B005
+                verbose:
+                  summary: Every optional key the reference client will honour
+                  value:
+                    accepted: true
+                    device_id: 260720B005
+                    device_name: Cala Water Heater
+                    mqtt:
+                      username: cala
+                      password: '…'
+                      topic_prefix: cala
+                    topics:
+                      prefix: cala
+                      state: cala/260720B005/state
+                      command: cala/260720B005/command
+                    broker:
+                      host: 192.168.1.10
+                      port: 1883
+        '400':
+          description: |
+            The request could not be processed. Plain-text body, one of:
+
+            * `Missing encrypted payload` — no `encrypted` field
+            * `Invalid JSON` — body, or decrypted plaintext, is not JSON
+            * `Decryption failed` — wrong pairing code (most common)
+
+            The reference client maps all three to "invalid code".
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                decrypt:
+                  value: Decryption failed
+        '403':
+          description: |
+            Decryption succeeded but the request was rejected. Plain-text body:
+
+            * `Invalid or expired code` — the pairing code is no longer valid
+            * `Invalid or expired device id` — code accepted, but `device_id`
+              in the plaintext does not match this heater
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                deviceId:
+                  value: Invalid or expired device id
+        '408':
+          description: The heater timed out reading the request body.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  schemas:
+    EncryptedEnvelope:
+      type: object
+      required: [encrypted]
+      additionalProperties: false
+      properties:
+        encrypted:
+          type: string
+          contentEncoding: base64
+          description: >-
+            Base64 of `IV(16) || AES-128-CBC ciphertext` of a `PairingRequest`
+            JSON document, keyed by `SHA-256(pairing_code)[0:16]`.
+
+    PairingRequest:
+      type: object
+      description: Plaintext that is encrypted into `EncryptedEnvelope.encrypted`.
+      required: [pairing_code, device_id, mqtt_broker]
+      additionalProperties: false
+      properties:
+        pairing_code:
+          type: string
+          description: >-
+            The code currently shown on the heater's Home Assistant pairing
+            screen. Also used as the encryption key, so it is redundant in
+            the plaintext; the firmware may use it as a decryption check
+            (UNCONFIRMED).
+        device_id:
+          type: string
+          description: Must match the heater's own id (see AsyncAPI `deviceId`). Mismatch → `403`.
+          examples: [260720B005]
+        mqtt_broker:
+          type: object
+          required: [host, port, username, password]
+          additionalProperties: false
+          properties:
+            host:
+              type: string
+              description: Broker hostname or IPv4 address reachable from the heater's LAN.
+              examples: ['192.168.1.10']
+            port:
+              type: integer
+              minimum: 1
+              maximum: 65535
+              default: 1883
+            username:
+              type: string
+              description: Broker login the heater will use.
+            password:
+              type: string
+              format: password
+      examples:
+        - pairing_code: '482913'
+          device_id: 260720B005
+          mqtt_broker:
+            host: 192.168.1.10
+            port: 1883
+            username: cala
+            password: '…'
+
+    PairingResponse:
+      type: object
+      description: |
+        Success body. All keys optional; the reference client resolves
+        several alternative spellings (listed per field). Topic defaults when
+        nothing is returned: `<prefix>/<deviceId>/state`,
+        `<prefix>/<deviceId>/command`, with `prefix` = `cala`; if
+        `topic_prefix` contains a `/` it is treated as a full base path
+        (`cala/260720B005`) and `/state`, `/command` are appended directly.
+      properties:
+        accepted:
+          type: boolean
+        status:
+          type: string
+          description: '`accepted` (case-insensitive) counts as success.'
+        device_id:
+          type: string
+          description: Overrides the id the client discovered. Alias `id`.
+        device_name:
+          type: string
+          description: Human-readable name. Alias `name`.
+        mqtt:
+          type: object
+          description: Broker login the heater will use (echoed from the request) and the topic prefix.
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+              format: password
+            topic_prefix:
+              type: string
+              examples: [cala, cala/260720B005]
+        topics:
+          type: object
+          description: Explicit topic layout. `state` alias `telemetry`.
+          properties:
+            prefix:
+              type: string
+            state:
+              type: string
+            telemetry:
+              type: string
+            command:
+              type: string
+        broker:
+          type: object
+          description: Broker address the heater will use. `host` alias `hostname`.
+          properties:
+            host:
+              type: string
+            hostname:
+              type: string
+            port:
+              type: integer
+        token:
+          type: string
+          description: Opaque pairing token, stored by the client but not used by the MQTT flow (UNCONFIRMED purpose). Aliases `auth_token`, `pairing_token`.
+        # Flat aliases the client also reads
+        state_topic:
+          type: string
+        telemetry_topic:
+          type: string
+        command_topic:
+          type: string
+        topic_prefix:
+          type: string
+        broker_host:
+          type: string
+        broker_port:
+          type: integer
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+      additionalProperties: true

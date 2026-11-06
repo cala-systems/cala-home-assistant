@@ -1,0 +1,842 @@
+asyncapi: 3.0.0
+
+# ---------------------------------------------------------------------------
+# Cala heat pump water heater — local MQTT API
+#
+# Reverse-documented from the open-source Home Assistant integration
+# (https://github.com/cala-systems/cala-home-assistant, v0.4.0) and checked
+# against live broker traffic from a production heater running firmware
+# v8.4.1. Message shapes and timing marked "observed" were seen on the wire;
+# the *semantics* of each field (computed vs. sensed, sampling window) are
+# marked where they are inferred rather than confirmed. Search for
+# "UNCONFIRMED" to find the places Cala should review.
+# ---------------------------------------------------------------------------
+
+info:
+  title: Cala Water Heater Local MQTT API
+  version: 0.4.0-draft
+  description: |
+    Local, LAN-only message interface between a Cala heat pump water heater
+    and a home automation controller (Home Assistant today), carried over an
+    MQTT broker that the homeowner operates.
+
+    ## Roles
+
+    This document is written from the **water heater's** point of view:
+
+    * `send` operations are messages the heater **publishes**.
+    * `receive` operations are messages the heater **subscribes to**.
+
+    A controller (e.g. Home Assistant) therefore subscribes where the heater
+    sends, and publishes where the heater receives.
+
+    ## Topic layout
+
+    All topics live under a prefix that the device hands out during pairing
+    (`mqtt.topic_prefix` in the pairing response). The prefix is either a
+    bare segment (`cala`) — in which case the device id is inserted as the
+    next segment — or a full base path (`cala/<deviceId>`). Both forms
+    resolve to the same layout:
+
+    | Purpose                       | Topic                                   | Direction        |
+    |-------------------------------|-----------------------------------------|------------------|
+    | Telemetry / state             | `cala/{deviceId}/state`                 | heater → ctrl    |
+    | Commands                      | `cala/{deviceId}/command`               | ctrl → heater    |
+    | Command acknowledgements      | `cala/{deviceId}/command/response`      | heater → ctrl    |
+    | Energy context (solar/battery)| `cala/{deviceId}/context`               | ctrl → heater    |
+    | Availability                  | `cala/{deviceId}/availability`          | heater → ctrl    |
+
+    `{deviceId}` is the device serial as printed on the heater and advertised
+    over mDNS (observed form: `260720B005` — ten characters, digits with an
+    uppercase letter).
+
+    All payloads except availability are UTF-8 JSON objects. The heater
+    pretty-prints its JSON (newlines and tab indentation) and may emit
+    numbers in exponent form (`3e-05`); both are valid JSON and consumers
+    must not depend on formatting. The integration ignores any message whose
+    payload is not a JSON object, and ignores unknown keys, so adding fields
+    is backward compatible.
+
+    ## Provisioning (out of band, HTTP — not part of the MQTT contract)
+
+    Before any MQTT traffic flows, the heater has to be told which broker to
+    connect to. This happens over a one-shot HTTP exchange on the LAN:
+
+    1. The heater advertises itself via mDNS/Zeroconf as `_cala._tcp.local.`
+       with a TXT record `device_id=<deviceId>` (the integration also accepts
+       `id`). The pairing web server is only up while the heater's screen is
+       on *Settings → Advanced → Home Assistant*, which also shows a
+       pairing code.
+    2. The controller `POST`s to `http://<heater-ip>:<port>/pair`
+       (default port 80) with body `{"encrypted": "<base64>"}` where the
+       base64 blob is `IV(16 bytes) || AES-128-CBC(key, IV, PKCS7(plaintext))`
+       and `key = SHA-256(pairing_code)[0:16]`. The plaintext is:
+
+       ```json
+       {
+         "pairing_code": "<code from heater screen>",
+         "device_id":    "<deviceId>",
+         "mqtt_broker":  { "host": "192.168.1.10", "port": 1883,
+                           "username": "cala", "password": "…" }
+       }
+       ```
+    3. On success the heater answers `200` with a JSON object. The
+       integration accepts any of the following shapes and treats the
+       request as accepted if `accepted: true`, `status: "accepted"`, or MQTT
+       credentials/topics are present:
+
+       ```json
+       { "mqtt": { "username": "cala", "password": "…",
+                   "topic_prefix": "cala/2507xxa006" } }
+       ```
+
+       Optional keys the integration will also honour: `device_id`/`id`,
+       `device_name`/`name`, `topics.{prefix,state,telemetry,command}`,
+       `state_topic`, `telemetry_topic`, `command_topic`, `broker.{host,port}`,
+       `token`/`auth_token`.
+    4. Error responses (plain-text body): `400` "Decryption failed" /
+       "Invalid JSON" / "Missing encrypted payload" (wrong pairing code);
+       `403` "Invalid or expired code"; `403` "Invalid or expired device id";
+       `408` request body read timeout.
+
+    Cala may want to publish this endpoint as a companion OpenAPI document.
+
+    ## Liveness
+
+    The heater publishes a retained `online` on the availability topic
+    (observed: it is delivered immediately on subscribe). Whether `offline`
+    is published via an MQTT Last Will on disconnect is UNCONFIRMED. The
+    integration does not consume this topic today; it marks the heater
+    *offline* after 300 s without a valid state message and raises a repair
+    issue after 15 min.
+
+  contact:
+    name: Cala Systems
+    url: https://github.com/cala-systems/cala-home-assistant/issues
+  externalDocs:
+    description: Home Assistant integration source (reference implementation)
+    url: https://github.com/cala-systems/cala-home-assistant
+  tags:
+    - name: telemetry
+      description: Periodic state published by the heater
+    - name: control
+      description: Commands sent to the heater and their acknowledgements
+    - name: context
+      description: Site energy context supplied to the heater
+
+defaultContentType: application/json
+
+servers:
+  localBroker:
+    host: '{brokerHost}:{brokerPort}'
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+    description: |
+      The homeowner's MQTT broker (Mosquitto in the Home Assistant docs). The
+      heater receives the broker host, port, username and password during
+      pairing and connects as a normal MQTT client. TLS is not used by the
+      reference implementation (UNCONFIRMED whether the firmware supports
+      `mqtts://`).
+    variables:
+      brokerHost:
+        description: Broker hostname or IPv4 address reachable from the heater's LAN.
+        examples:
+          - '192.168.1.10'
+          - homeassistant.local
+      brokerPort:
+        default: '1883'
+    security:
+      - $ref: '#/components/securitySchemes/brokerCredentials'
+    bindings:
+      mqtt:
+        clientId: >-
+          UNCONFIRMED — the client id the firmware uses is not visible from
+          the integration.
+        cleanSession: true
+
+channels:
+  state:
+    address: 'cala/{deviceId}/state'
+    title: Telemetry / state
+    summary: Periodic snapshot of the heater's sensors and actuator states.
+    description: |
+      Published by the heater every 60 s (observed: `uptime_sec` advances by
+      exactly 60 between consecutive messages, whether or not any value
+      changed). The message is a flat JSON object; any subset of the
+      documented keys may be present, since different firmware builds
+      publish different fields — e.g. firmware v8.4.1 sends every key below
+      except `delivery_c`. Consumers should treat a missing key as "no
+      update" rather than "zero".
+    parameters:
+      deviceId:
+        $ref: '#/components/parameters/deviceId'
+    messages:
+      telemetry:
+        $ref: '#/components/messages/telemetry'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+
+  command:
+    address: 'cala/{deviceId}/command'
+    title: Commands
+    summary: Control messages sent to the heater.
+    description: |
+      A single topic carrying a discriminated union of commands keyed by
+      `type`. Every command is acknowledged on the `commandResponse` channel;
+      the reference client waits 10 s for that acknowledgement before giving
+      up.
+    parameters:
+      deviceId:
+        $ref: '#/components/parameters/deviceId'
+    messages:
+      createBoost:
+        $ref: '#/components/messages/createBoost'
+      cancelBoost:
+        $ref: '#/components/messages/cancelBoost'
+      setTouSchedule:
+        $ref: '#/components/messages/setTouSchedule'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+
+  commandResponse:
+    address: 'cala/{deviceId}/command/response'
+    title: Command acknowledgement
+    summary: Accept / reject reply for each command.
+    description: |
+      The topic is always the command topic with `/response` appended.
+      Nothing in the payload correlates the reply to a specific command:
+      requests carry no id, and the `id` in the reply is the identifier of
+      the boost the command acted on (observed: `create_boost` and the
+      following `cancel_boost` both returned the same UUID). The reference
+      client therefore subscribes just before publishing a command and takes
+      the first reply it sees.
+    parameters:
+      deviceId:
+        $ref: '#/components/parameters/deviceId'
+    messages:
+      commandResponse:
+        $ref: '#/components/messages/commandResponse'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+
+  context:
+    address: 'cala/{deviceId}/context'
+    title: Energy context
+    summary: Site-level solar production and battery state supplied to the heater.
+    description: |
+      Optional. If the homeowner links solar / battery entities in the
+      integration options, the controller publishes this whenever one of them
+      changes state. Only fields with valid data are included; the message is
+      not sent at all if nothing valid is available. How the heater uses this
+      (e.g. to prefer heating during solar surplus) is UNCONFIRMED.
+    parameters:
+      deviceId:
+        $ref: '#/components/parameters/deviceId'
+    messages:
+      energyContext:
+        $ref: '#/components/messages/energyContext'
+    bindings:
+      mqtt:
+        qos: 0
+        retain: false
+
+  availability:
+    address: 'cala/{deviceId}/availability'
+    title: Availability
+    summary: Retained online/offline marker.
+    description: |
+      Observed: the heater publishes the plain-text string `online` with the
+      retain flag set, so a new subscriber learns the state immediately. The
+      `offline` value and its trigger (MQTT Last Will on unclean disconnect,
+      explicit publish on shutdown) are UNCONFIRMED — the reference client
+      does not subscribe to this topic.
+    parameters:
+      deviceId:
+        $ref: '#/components/parameters/deviceId'
+    messages:
+      availability:
+        $ref: '#/components/messages/availability'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+
+operations:
+  publishTelemetry:
+    action: send
+    channel:
+      $ref: '#/channels/state'
+    title: Publish telemetry
+    summary: Heater publishes a state snapshot (≈ every minute).
+    tags:
+      - name: telemetry
+    messages:
+      - $ref: '#/channels/state/messages/telemetry'
+
+  receiveCommand:
+    action: receive
+    channel:
+      $ref: '#/channels/command'
+    title: Receive command
+    summary: Heater executes a command and acknowledges it.
+    tags:
+      - name: control
+    messages:
+      - $ref: '#/channels/command/messages/createBoost'
+      - $ref: '#/channels/command/messages/cancelBoost'
+      - $ref: '#/channels/command/messages/setTouSchedule'
+    reply:
+      channel:
+        $ref: '#/channels/commandResponse'
+      messages:
+        - $ref: '#/channels/commandResponse/messages/commandResponse'
+
+  receiveEnergyContext:
+    action: receive
+    channel:
+      $ref: '#/channels/context'
+    title: Receive energy context
+    summary: Heater ingests solar / battery context from the site.
+    tags:
+      - name: context
+    messages:
+      - $ref: '#/channels/context/messages/energyContext'
+
+  publishAvailability:
+    action: send
+    channel:
+      $ref: '#/channels/availability'
+    title: Publish availability
+    summary: Heater announces online (and presumably offline via Last Will).
+    tags:
+      - name: telemetry
+    messages:
+      - $ref: '#/channels/availability/messages/availability'
+
+components:
+  securitySchemes:
+    brokerCredentials:
+      type: userPassword
+      description: |
+        Username/password login to the homeowner's broker. The same
+        credentials are typed into the integration's pairing form and pushed
+        to the heater in the encrypted `/pair` request; the heater echoes
+        them back in its pairing response.
+
+  parameters:
+    deviceId:
+      description: |
+        Device serial / identifier. Advertised as the `device_id` TXT record
+        of the `_cala._tcp.local.` mDNS service and returned as `device_id`
+        (or `id`) in the pairing response. Observed form: ten characters,
+        digits with an uppercase letter (`260720B005`); the integration's
+        own example is `2507xxa006`.
+      examples:
+        - '260720B005'
+        - '2507xxa006'
+
+  messages:
+    telemetry:
+      name: telemetry
+      title: Telemetry snapshot
+      summary: Temperatures, water, energy, actuator states and diagnostics.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/Telemetry'
+      examples:
+        - name: idle
+          summary: Observed from firmware v8.4.1 while idle (SSID/IP replaced); key order as sent
+          payload:
+            top_c: 53.3
+            upper_c: 51.9
+            lower_c: 48.7
+            liters_available: 251
+            compressor_hz: 0
+            upper_element_on: false
+            lower_element_on: false
+            boost_mode_on: false
+            energy_used_kwh: 3.0e-05
+            liters_used: 0
+            ambient_c: 22.91
+            inlet_c: 26.93
+            fan_on: false
+            fan_speed_high: false
+            uptime_sec: 91080
+            wifi_ssid: homelan
+            wifi_ip: 192.168.1.42
+            wifi_rssi_dbm: -31
+            fw_version: v8.4.1
+        - name: heating
+          summary: Illustrative values while the compressor runs (not recorded)
+          payload:
+            top_c: 54.8
+            upper_c: 53.1
+            lower_c: 41.6
+            liters_available: 148
+            compressor_hz: 62
+            upper_element_on: false
+            lower_element_on: false
+            boost_mode_on: true
+            energy_used_kwh: 0.0083
+            liters_used: 2.4
+            ambient_c: 21.4
+            inlet_c: 15.2
+            fan_on: true
+            fan_speed_high: false
+            uptime_sec: 91140
+            wifi_ssid: homelan
+            wifi_ip: 192.168.1.42
+            wifi_rssi_dbm: -58
+            fw_version: v8.4.1
+
+    createBoost:
+      name: create_boost
+      title: Start boost
+      summary: Heat aggressively for a fixed number of hours.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CreateBoostCommand'
+      examples:
+        - name: 24 hour boost
+          payload:
+            type: create_boost
+            hours: 24
+
+    cancelBoost:
+      name: cancel_boost
+      title: Stop boost
+      summary: End an active boost early.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CancelBoostCommand'
+      examples:
+        - name: cancel
+          payload:
+            type: cancel_boost
+
+    setTouSchedule:
+      name: set_tou_schedule
+      title: Set time-of-use schedule
+      summary: Replace the heater's electricity price schedule.
+      description: |
+        Rates are absolute $/kWh (currency UNCONFIRMED — the integration says
+        "$/kWh"; the firmware may treat them as unitless relative prices).
+        Times not covered by a period fall back to `defaultRate`. The firmware
+        rejects rates ≤ 0, which is why the reference client clamps forecast
+        prices to a 0.001 floor before publishing.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SetTouScheduleCommand'
+      examples:
+        - name: summer weekday peak
+          summary: One season, weekday afternoon peak, everything else at the default rate
+          payload:
+            type: set_tou_schedule
+            touSchedule:
+              version: 1
+              defaultRate: 0.12
+              seasons:
+                - startDate: '06-01'
+                  endDate: '09-30'
+                  daySchedules:
+                    - days: [mon, tue, wed, thu, fri]
+                      periods:
+                        - startMin: 600
+                          endMin: 840
+                          rate: 0.32
+        - name: flat rate
+          summary: Clear all periods (produced by the client when a price feed is flat)
+          payload:
+            type: set_tou_schedule
+            touSchedule:
+              version: 1
+              defaultRate: 0.15
+              seasons: []
+
+    commandResponse:
+      name: command_response
+      title: Command acknowledgement
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CommandResponse'
+      examples:
+        - name: accepted
+          summary: Observed reply to create_boost (and, with the same id, to the subsequent cancel_boost)
+          payload:
+            status: accepted
+            id: 1588e892-7d8f-4e9d-8395-d350d9f9e760
+        - name: rejected
+          payload:
+            status: rejected
+            reason: rate must be > 0
+
+    energyContext:
+      name: energy_context
+      title: Energy context
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/EnergyContext'
+      examples:
+        - name: solar and battery
+          payload:
+            v: 1
+            ts: 1757548800.123
+            context:
+              solar:
+                production_w: 3120.5
+              battery:
+                soc: 0.7325
+        - name: solar only
+          payload:
+            v: 1
+            ts: 1757548860.001
+            context:
+              solar:
+                production_w: 0
+
+    availability:
+      name: availability
+      title: Availability (UNCONFIRMED)
+      contentType: text/plain
+      payload:
+        type: string
+        enum: [online, offline]
+        description: >-
+          Placeholder. Home Assistant's MQTT conventions use retained
+          `online`/`offline` strings; the real Cala payload is unknown.
+
+  schemas:
+    Telemetry:
+      type: object
+      description: |
+        Flat state snapshot. Every key is optional; consumers keep the last
+        value for keys absent from a given message. Observed encoding
+        (firmware v8.4.1): JSON booleans for flags, JSON numbers elsewhere
+        (integers where the value is whole, exponent form for very small
+        values such as `3e-05`). The reference client additionally tolerates
+        numeric strings and `0/1` / `"on"/"off"` flags, but firmware should
+        not rely on that.
+      additionalProperties: true
+      properties:
+        # ---- Temperatures (°C) ------------------------------------------
+        top_c:
+          type: number
+          description: Tank temperature at the top sensor, °C. Sensed (UNCONFIRMED).
+        upper_c:
+          type: number
+          description: Tank temperature at the upper sensor, °C. Sensed (UNCONFIRMED).
+        lower_c:
+          type: number
+          description: Tank temperature at the lower sensor, °C. Sensed (UNCONFIRMED).
+        delivery_c:
+          type: number
+          description: >-
+            Hot water delivery (outlet) temperature, °C. Defined by the
+            reference client but NOT observed in firmware v8.4.1 output —
+            UNCONFIRMED whether it exists in other builds, and whether it is
+            a direct outlet sensor reading or computed (e.g. after a mixing
+            valve).
+        inlet_c:
+          type: number
+          description: Cold water inlet temperature, °C. Sensed (UNCONFIRMED).
+        ambient_c:
+          type: number
+          description: Air temperature at the heat pump intake, °C. Sensed (UNCONFIRMED).
+
+        # ---- Water ------------------------------------------------------
+        liters_available:
+          type: number
+          minimum: 0
+          description: >-
+            Estimated hot water currently available, litres. Modelled as a
+            tank level (not cumulative) by the reference client. How it is
+            computed — set-point-relative energy content, stratification
+            model, etc. — is UNCONFIRMED.
+        liters_used:
+          type: number
+          minimum: 0
+          description: >-
+            Litres of hot water drawn since the previous telemetry message
+            (≈ last minute). The reference client both displays it as a flow
+            rate in L/min and sums it into daily/lifetime totals, so the
+            reporting interval must be fixed at one minute for those to be
+            consistent (UNCONFIRMED). Negative values are rejected.
+
+        # ---- Energy / heat pump -----------------------------------------
+        energy_used_kwh:
+          type: number
+          minimum: 0
+          description: >-
+            Electrical energy consumed since the previous telemetry message,
+            kWh (≈ last minute). The reference client multiplies by 60 to
+            show average power in kW and sums it into daily/lifetime totals.
+            Negative values are rejected.
+        compressor_hz:
+          type: number
+          minimum: 0
+          description: Compressor drive frequency, Hz. 0 when the compressor is off.
+
+        # ---- Actuator / mode flags --------------------------------------
+        upper_element_on:
+          $ref: '#/components/schemas/Flag'
+          description: Upper resistive heating element energised.
+        lower_element_on:
+          $ref: '#/components/schemas/Flag'
+          description: Lower resistive heating element energised.
+        boost_mode_on:
+          $ref: '#/components/schemas/Flag'
+          description: >-
+            A boost (see `create_boost`) is active. The reference client sets
+            this optimistically when a boost command is accepted, then trusts
+            the next telemetry message.
+        fan_on:
+          $ref: '#/components/schemas/Flag'
+          description: Heat pump evaporator fan running.
+        fan_speed_high:
+          $ref: '#/components/schemas/Flag'
+          description: Fan is at its high speed (vs. low). Meaning when `fan_on` is false is UNCONFIRMED.
+
+        # ---- Diagnostics ------------------------------------------------
+        uptime_sec:
+          type: integer
+          minimum: 0
+          description: Seconds since the controller board last booted.
+        wifi_ip:
+          type: string
+          format: ipv4
+          description: IPv4 address the heater currently holds on the LAN.
+        wifi_ssid:
+          type: string
+          description: SSID the heater is associated with.
+        wifi_rssi_dbm:
+          type: integer
+          maximum: 0
+          description: Wi-Fi received signal strength, dBm.
+        fw_version:
+          type: string
+          description: Firmware version string of the controller board, e.g. `v8.4.1` (leading `v` observed).
+          examples: [v8.4.1]
+
+    Flag:
+      description: >-
+        Boolean state. Firmware emits JSON booleans (observed); the
+        reference client also tolerates 0/1 and the strings on/off,
+        true/false, yes/no.
+      oneOf:
+        - type: boolean
+        - type: integer
+          enum: [0, 1]
+        - type: string
+          enum: ['true', 'false', 'on', 'off', '1', '0', 'yes', 'no']
+
+    Command:
+      type: object
+      description: Base shape shared by all commands; `type` selects the variant.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [create_boost, cancel_boost, set_tou_schedule]
+      discriminator: type
+
+    CreateBoostCommand:
+      allOf:
+        - $ref: '#/components/schemas/Command'
+        - type: object
+          required: [type, hours]
+          properties:
+            type:
+              const: create_boost
+            hours:
+              type: integer
+              minimum: 1
+              maximum: 168
+              default: 24
+              description: >-
+                Boost duration in whole hours. Bounds are those the reference
+                client enforces in its UI; the firmware's real limits are
+                UNCONFIRMED. Behaviour when a boost is already running
+                (extend? replace? reject?) is UNCONFIRMED.
+
+    CancelBoostCommand:
+      allOf:
+        - $ref: '#/components/schemas/Command'
+        - type: object
+          required: [type]
+          properties:
+            type:
+              const: cancel_boost
+
+    SetTouScheduleCommand:
+      allOf:
+        - $ref: '#/components/schemas/Command'
+        - type: object
+          required: [type, touSchedule]
+          properties:
+            type:
+              const: set_tou_schedule
+            touSchedule:
+              $ref: '#/components/schemas/TouSchedule'
+
+    TouSchedule:
+      type: object
+      description: |
+        Period-based electricity price schedule. Resolution order at any
+        instant: find the season containing today's date, then the
+        daySchedule containing today's weekday, then the period containing
+        the current minute-of-day; if any lookup fails, use `defaultRate`.
+        Limits below are those the reference client validates before
+        publishing and are assumed to mirror firmware storage limits
+        (UNCONFIRMED).
+      required: [version, defaultRate, seasons]
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+          const: 1
+          description: Schema version. Only 1 is defined.
+        defaultRate:
+          type: number
+          exclusiveMinimum: 0
+          description: Rate applied whenever no period matches, $/kWh.
+        seasons:
+          type: array
+          maxItems: 4
+          description: Date ranges. Must not overlap (wrap-around aware). May be empty.
+          items:
+            $ref: '#/components/schemas/TouSeason'
+
+    TouSeason:
+      type: object
+      required: [startDate, endDate, daySchedules]
+      additionalProperties: false
+      properties:
+        startDate:
+          type: string
+          pattern: '^\d{2}-\d{2}$'
+          description: Inclusive start, `MM-DD`. `02-29` is accepted.
+          examples: ['06-01']
+        endDate:
+          type: string
+          pattern: '^\d{2}-\d{2}$'
+          description: Inclusive end, `MM-DD`. May be earlier than `startDate` to wrap the year end (e.g. `11-01` → `02-28`).
+          examples: ['09-30']
+        daySchedules:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: Each weekday may appear in at most one daySchedule of a season.
+          items:
+            $ref: '#/components/schemas/TouDaySchedule'
+
+    TouDaySchedule:
+      type: object
+      required: [days, periods]
+      additionalProperties: false
+      properties:
+        days:
+          type: array
+          minItems: 1
+          maxItems: 7
+          uniqueItems: true
+          items:
+            type: string
+            enum: [sun, mon, tue, wed, thu, fri, sat]
+        periods:
+          type: array
+          minItems: 1
+          maxItems: 8
+          description: Must not overlap within a daySchedule.
+          items:
+            $ref: '#/components/schemas/TouPeriod'
+
+    TouPeriod:
+      type: object
+      required: [startMin, endMin, rate]
+      additionalProperties: false
+      properties:
+        startMin:
+          type: integer
+          minimum: 0
+          maximum: 1439
+          description: Inclusive start, minutes since local midnight.
+        endMin:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: Exclusive end, minutes since local midnight. Must be greater than `startMin`; periods cannot cross midnight.
+        rate:
+          type: number
+          exclusiveMinimum: 0
+          description: Price during this period, $/kWh. The firmware rejects values ≤ 0.
+
+    CommandResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [accepted, rejected]
+          description: >-
+            `accepted` means the command was validated and applied (or
+            scheduled). Any other value is treated as a failure by the
+            reference client. Observed: the reply arrives within well under
+            a second of the command.
+        reason:
+          type: string
+          description: Human-readable explanation, expected when `status` is `rejected`. The set of reason strings is UNCONFIRMED.
+        id:
+          type: string
+          format: uuid
+          description: >-
+            Identifier of the boost the command acted on (observed: a UUID
+            returned by `create_boost`, and the same UUID returned by the
+            `cancel_boost` that ended it). Not a request correlation id —
+            requests carry none. UNCONFIRMED whether `set_tou_schedule`
+            replies include an id, and what it would identify.
+      additionalProperties: true
+
+    EnergyContext:
+      type: object
+      required: [v, ts, context]
+      additionalProperties: false
+      properties:
+        v:
+          type: integer
+          const: 1
+          description: Envelope version.
+        ts:
+          type: number
+          description: Unix time of publication, seconds (fractional), UTC.
+        context:
+          type: object
+          description: At least one of `solar` or `battery` is present.
+          minProperties: 1
+          additionalProperties: false
+          properties:
+            solar:
+              type: object
+              required: [production_w]
+              additionalProperties: false
+              properties:
+                production_w:
+                  type: number
+                  minimum: 0
+                  maximum: 100000
+                  description: Instantaneous site PV production, watts (rounded to 0.01).
+            battery:
+              type: object
+              required: [soc]
+              additionalProperties: false
+              properties:
+                soc:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  description: Home battery state of charge as a fraction 0.0–1.0 (rounded to 4 dp).
