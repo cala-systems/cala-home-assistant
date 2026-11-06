@@ -19,6 +19,23 @@ def write_state_if_added(entity) -> None:
         entity.async_write_ha_state()
 
 
+# Labels the boost button's old _sync_entity_registry wrote into the entity
+# registry as user overrides (removed in v0.5.1). Overrides win over the
+# entity's own name/icon, so leftovers freeze the button on one label.
+LEGACY_BOOST_BUTTON_NAMES = ("Start 24h Boost", "Stop Boost")
+LEGACY_BOOST_BUTTON_ICONS = ("mdi:play-circle", "mdi:stop-circle")
+
+
+def legacy_boost_label_overrides(name: str | None, icon: str | None) -> dict:
+    """Registry fields to clear: only values our old code wrote, never the user's own."""
+    clear: dict = {}
+    if name in LEGACY_BOOST_BUTTON_NAMES:
+        clear["name"] = None
+    if icon in LEGACY_BOOST_BUTTON_ICONS:
+        clear["icon"] = None
+    return clear
+
+
 def get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
     """Resolve command topic for device_id from config entries."""
     for entry in hass.config_entries.async_entries(DOMAIN):

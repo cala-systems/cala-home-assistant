@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 
@@ -23,6 +24,7 @@ from .const import (
 )
 
 from .boost_services import get_boost_entity_id
+from .helpers import legacy_boost_label_overrides
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -84,6 +86,7 @@ class BoostButton(ButtonEntity):
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to boost state changes."""
+        self._clear_legacy_label_overrides()
         if not self._boost_entity_id:
             _LOGGER.warning(
                 "Cala button: device_id=%s no boost_entity_id, button will always show Start",
@@ -138,6 +141,15 @@ class BoostButton(ButtonEntity):
         else:
             self._attr_name = "Start 24h Boost"
             self._attr_icon = "mdi:play-circle"
+
+    def _clear_legacy_label_overrides(self) -> None:
+        """Drop name/icon overrides that versions before v0.5.1 wrote to the registry."""
+        entry = self.registry_entry
+        if entry is None:
+            return
+        clear = legacy_boost_label_overrides(entry.name, entry.icon)
+        if clear:
+            er.async_get(self._hass).async_update_entity(self.entity_id, **clear)
 
     @property
     def name(self) -> str:
