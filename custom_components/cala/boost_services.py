@@ -121,18 +121,10 @@ def get_boost_entity_id(hass, device_id: str) -> str | None:
     device = dev_reg.async_get_device(identifiers={(DOMAIN, device_id)})
     if device:
         for entry in async_entries_for_device(ent_reg, device.id):
-            if entry.unique_id and entry.unique_id.endswith(BOOST_UNIQUE_ID_SUFFIX):
+            if (
+                entry.platform == DOMAIN
+                and entry.unique_id
+                and entry.unique_id.endswith(BOOST_UNIQUE_ID_SUFFIX)
+            ):
                 return entry.entity_id
-    device_id_norm = device_id.lower().replace("-", "_")
-    for entry in ent_reg.entities.values():
-        if (
-            entry.domain in ("sensor", "binary_sensor")
-            and entry.unique_id
-            and entry.unique_id.lower().endswith(BOOST_UNIQUE_ID_SUFFIX)
-            and (
-                device_id.lower() in entry.unique_id.lower()
-                or device_id_norm in entry.unique_id.lower()
-            )
-        ):
-            return entry.entity_id
     return None

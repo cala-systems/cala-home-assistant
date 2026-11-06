@@ -295,9 +295,39 @@ If you have configured a **TOU rates entity** (price feed) and it is currently p
 
 The raw `cala.set_tou_schedule` service (Developer Tools / automations) is **not** blocked by an active feed — it is a deliberate developer escape hatch. A manual service call will publish, but the feed will overwrite it on its next tick; the card, being the normal user path, is what enforces feed-wins.
 
-## Solar & Battery Data (Optional)
+## Solar, Grid & Battery Data (Optional)
 
-Solar and battery entity mappings are optional. Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.
+Cala receives advisory data only and remains in full control of operation. No direct control commands are accepted from Home Assistant for these inputs.
+
+**There is nothing to set up.** Cala reads the power sensors from Home Assistant's Energy dashboard settings (**Settings → Dashboards → Energy**):
+
+| Energy setting | Sent to the heater as |
+|---|---|
+| Solar panels → solar production power | `solar` |
+| Electricity grid → grid power | `grid` |
+| Home battery storage → battery power and state of charge | `battery` |
+
+Home Assistant already normalises the signs (grid positive = importing, battery positive = discharging, including inverted and two-sensor setups), so Cala asks nothing. Sources without a power sensor are left out. When the Energy settings change, the integration reloads and picks up the new sensors.
+
+The Energy dashboard has no grid-outage sensor, so that one is a Cala option: **Settings → Devices & services → Cala → Configure → Settings → Grid status entity (on-grid / off-grid)**. Pick a binary sensor that is on while the house is on utility power (e.g. a Powerwall's grid status), or turn on **Invert grid status** if yours is on during an outage. With it set, `grid` also carries `grid_disconnected`; without it, the field is left out. Solar, grid and battery still come from the Energy settings.
+
+The same page keeps the TOU price feed and the **publish interval** (seconds, default 30: readings are re-sent on this interval even when nothing changes), plus a **Choose solar, grid and battery sensors by hand** toggle for testing (see [`examples/test_panel`](examples/test_panel)) or systems the Energy dashboard can't describe. Turning it on adds a page with the hand-mapped power sensors and sign conventions; the grid status entity applies either way.
+
+The integration publishes to `cala/<device_id>/context` once at startup, on every change of a source sensor (at most once every 5 s), and on the publish interval. `ts` is the latest time Home Assistant heard from any source sensor (`last_reported`), not the send time, so the heater can tell a steady sensor from a frozen one. Unavailable entities are left out rather than sent as zero.
+
+```json
+{
+  "v": 2,
+  "ts": 1790000000.0,
+  "context": {
+    "solar": {"production_w": 5230.0, "producing": true},
+    "grid": {"import_w": 0.0, "export_w": 3100.0, "power_w": -3100.0, "exporting": true, "importing": false, "grid_disconnected": false},
+    "battery": {"soc_percent": 87.0, "power_w": 1200.0, "charging": true, "discharging": false}
+  }
+}
+```
+
+`grid.power_w` is negative when exporting; `battery.power_w` is positive when charging.
 
 ## Removing the Integration
 

@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
@@ -101,7 +100,6 @@ class BoostButton(ButtonEntity):
         )
         # Set initial name/icon from current boost state
         self._update_name_and_icon(initial_state is not None and initial_state.state == "on")
-        self._sync_entity_registry()
 
         @callback
         def _boost_state_changed(event):
@@ -116,7 +114,6 @@ class BoostButton(ButtonEntity):
             # Update entity state
             self._update_name_and_icon(new_state is not None and new_state.state == "on")
             self.async_write_ha_state()
-            self._sync_entity_registry()
 
         self.async_on_remove(
             async_track_state_change_event(
@@ -141,16 +138,6 @@ class BoostButton(ButtonEntity):
         else:
             self._attr_name = "Start 24h Boost"
             self._attr_icon = "mdi:play-circle"
-
-    def _sync_entity_registry(self) -> None:
-        """Update entity registry with current name/icon so device page displays correctly."""
-        if self.entity_id:
-            ent_reg = async_get_entity_registry(self._hass)
-            ent_reg.async_update_entity(
-                self.entity_id,
-                name=self._attr_name,
-                icon=self._attr_icon,
-            )
 
     @property
     def name(self) -> str:

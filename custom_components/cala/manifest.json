@@ -1,6 +1,9 @@
 {
   "domain": "cala",
   "name": "Cala",
+  "after_dependencies": [
+    "energy"
+  ],
   "codeowners": [
     "@cala-systems"
   ],
@@ -15,7 +18,7 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/cala-systems/cala-home-assistant/issues",
   "requirements": [],
-  "version": "0.4.0",
+  "version": "0.5.0",
   "zeroconf": [
     "_cala._tcp.local."
   ]
