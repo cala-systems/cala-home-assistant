@@ -28,7 +28,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from .entity import CalaBase
-from .helpers import parse_mqtt_json_payload
+from .helpers import parse_mqtt_json_payload, write_state_if_added
 from .mqtt_helper import _mqtt_available
 from .tou_schedule_sensor import CalaTouScheduleSensor
 from .const import (
@@ -242,8 +242,6 @@ class CalaTelemetrySensor(CalaBase, SensorEntity):
         # because HA assumes they are numeric and will throw on async_write_ha_state error.
         if key in ("fw_version", "wifi_ip", "wifi_ssid"):
             self._attr_state_class = None
-        elif key in ("energy_used_kwh", "gallons_used"):
-            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         else:
             self._attr_state_class = meta.get("state_class")
 
@@ -506,7 +504,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     def _set_entities_available(available: bool) -> None:
         for e in all_data_entities:
             e._attr_available = available
-            e.async_write_ha_state()
+            write_state_if_added(e)
         async_dispatcher_send(
             hass, SIGNAL_AVAILABILITY.format(entry_id=entry.entry_id), available
         )
@@ -600,7 +598,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         def _do() -> None:
             for e in all_data_entities:
                 e._attr_available = available
-                e.async_write_ha_state()
+                write_state_if_added(e)
             async_dispatcher_send(
                 hass, SIGNAL_AVAILABILITY.format(entry_id=entry.entry_id), available
             )
@@ -613,7 +611,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         nonlocal timeout_timer_handle
         timeout_timer_handle = None
         connection_status.set_state(ConnectionStatus.OFFLINE)
-        connection_status.async_write_ha_state()
+        write_state_if_added(connection_status)
         _set_entities_available(False)
         _schedule_repair_issue()
         _LOGGER.info(
@@ -635,7 +633,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             ConnectionStatus.OFFLINE.value,
         ):
             connection_status.set_state(ConnectionStatus.CONNECTED)
-            connection_status.async_write_ha_state()
+            write_state_if_added(connection_status)
             _clear_repair_issue_and_timer()
             _set_entities_available(True)
 
@@ -670,7 +668,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 for s in sensors:
                     try:
                         s.update_from_payload(payload)
-                        s.async_write_ha_state()
+                        write_state_if_added(s)
                     except Exception:
                         _LOGGER.exception("Error updating sensor %s", getattr(s, "_key", "?"))
 
@@ -682,7 +680,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 for t in totalizer_sensors:
                     try:
                         t.update_value()
-                        t.async_write_ha_state()
+                        write_state_if_added(t)
                     except Exception:
                         _LOGGER.exception("Error updating totalizer sensor %s", getattr(t, "_attr_name", "?"))
 
