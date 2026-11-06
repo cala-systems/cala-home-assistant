@@ -10,8 +10,9 @@ water heater and a local controller such as this integration.
 
 ## Status
 
-These documents were reverse-engineered from this integration (v0.4.0) and
-checked against live broker traffic from a heater on firmware v8.4.1. They
+These documents were reverse-engineered from this integration (v0.4.0; the
+`context` payload is updated to v0.5.0, payload version 2) and checked
+against live broker traffic from a heater on firmware v8.4.1. They
 are accurate as to *message shapes*; where the *meaning* of a field or a
 firmware behaviour could not be determined from the client side, the text
 says `UNCONFIRMED`. Those markers are the to-do list for Cala engineers —
