@@ -19,6 +19,17 @@ def get_command_topic(hass: HomeAssistant, device_id: str) -> str | None:
     return None
 
 
+def entity_id_from_option(value) -> str | None:
+    """Normalize an option value to an entity_id (EntitySelector may store a dict or a string)."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get("entity_id") or value.get("id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _normalize_mqtt_payload(payload) -> str:
     """Convert MQTT payload (bytes/str/memoryview) to string."""
     if payload is None:

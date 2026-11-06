@@ -45,7 +45,16 @@ _stub_module(
     ServiceCall=object,
     callback=_callback,
 )
-_stub_module("homeassistant.config_entries", ConfigEntry=object)
+class _ConfigEntryState:
+    LOADED = "loaded"
+    NOT_LOADED = "not_loaded"
+
+
+_stub_module(
+    "homeassistant.config_entries",
+    ConfigEntry=object,
+    ConfigEntryState=_ConfigEntryState,
+)
 _mqtt = _stub_module("homeassistant.components.mqtt")
 _stub_module("homeassistant.components", mqtt=_mqtt)
 
@@ -166,6 +175,8 @@ _event = _stub_module(
     "homeassistant.helpers.event",
     async_track_state_change_event=lambda *args, **kwargs: (lambda: None),
     async_track_time_change=lambda *args, **kwargs: (lambda: None),
+    async_track_time_interval=lambda *args, **kwargs: (lambda: None),
+    async_call_later=lambda *args, **kwargs: (lambda: None),
 )
 _stub_module(
     "homeassistant.helpers",

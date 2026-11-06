@@ -1,0 +1,351 @@
+"""examples/test_panel: the package, dashboard and README agree with each other and the code."""
+
+import json
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+import yaml
+
+from cala import const, energy_sources, publish
+from cala.sensor import TELEMETRY_FIELDS
+
+PANEL_DIR = Path(__file__).resolve().parents[1] / "examples" / "test_panel"
+PACKAGE = yaml.safe_load((PANEL_DIR / "cala_test_panel.yaml").read_text())
+DASHBOARD_TEXT = (PANEL_DIR / "dashboard.yaml").read_text()
+DASHBOARD = yaml.safe_load(DASHBOARD_TEXT)
+README = (PANEL_DIR / "README.md").read_text()
+
+TEST_ID_RE = re.compile(r"\b(?:sensor|binary_sensor|input_number|input_select|input_boolean)\.cala_test_\w+")
+MIN_PUBLISH_INTERVAL_S = 10  # options_flow NumberSelector min
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _template_entities() -> dict[str, dict]:
+    out = {}
+    for block in PACKAGE["template"]:
+        for domain in ("sensor", "binary_sensor"):
+            for ent in block.get(domain, []):
+                out[f"{domain}.{_slug(ent['name'])}"] = ent
+    return out
+
+
+TEMPLATES = _template_entities()
+PACKAGE_IDS = (
+    {f"input_number.{k}" for k in PACKAGE["input_number"]}
+    | {f"input_select.{k}" for k in PACKAGE["input_select"]}
+    | {f"input_boolean.{k}" for k in PACKAGE["input_boolean"]}
+    | set(TEMPLATES)
+    | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["mqtt"]["sensor"]}
+    | {f"sensor.{_slug(s['name'])}" for s in PACKAGE["sensor"]}
+)
+METERS = {f"sensor.{_slug(s['name'])}": s for s in PACKAGE["sensor"]}
+
+
+def _dashboard_entities(node) -> list[str]:
+    if isinstance(node, dict):
+        found = [node["entity"]] if isinstance(node.get("entity"), str) else []
+        return found + [e for v in node.values() for e in _dashboard_entities(v)]
+    if isinstance(node, list):
+        return [e for v in node for e in _dashboard_entities(v)]
+    return []
+
+
+def _fenced_after(marker: str) -> str:
+    m = re.search(rf"<!-- {marker} -->\s*```\w*\n(.*?)```", README, re.S)
+    assert m, f"README block {marker} not found"
+    return m.group(1)
+
+
+README_OPTIONS = yaml.safe_load(_fenced_after("options"))
+README_ENERGY = yaml.safe_load(_fenced_after("energy"))
+README_GRID_STATUS = yaml.safe_load(_fenced_after("grid-status-option"))
+ENERGY_OPTIONS = energy_sources.effective_context_options(
+    README_GRID_STATUS, energy_sources.mapping_from_energy_prefs(README_ENERGY)
+)
+README_PAYLOAD = json.loads(_fenced_after("example-payload"))
+
+
+def test_readme_and_dashboard_only_reference_entities_the_package_creates():
+    referenced = set(TEST_ID_RE.findall(README)) | set(TEST_ID_RE.findall(DASHBOARD_TEXT))
+    assert referenced - PACKAGE_IDS == set()
+    assert set(TEMPLATES) <= referenced
+
+
+def test_dashboard_cala_ids_match_the_integrations_naming():
+    names = [m["name"] for m in TELEMETRY_FIELDS.values()]
+    names += list(const.BINARY_FIELDS.values()) + ["Connection", "Energy Today", "Energy Total"]
+    known = {_slug(f"Cala Water Heater {n}") for n in names}
+    cala_ids = [e for e in _dashboard_entities(DASHBOARD) if ".cala_water_heater_" in e]
+    assert cala_ids
+    for entity_id in cala_ids:
+        assert entity_id.split(".", 1)[1] in known, entity_id
+
+
+@pytest.mark.parametrize(
+    "entity_id, device_class, unit",
+    [
+        ("sensor.cala_test_solar_production", "power", "W"),
+        ("sensor.cala_test_grid_power", "power", "W"),
+        ("sensor.cala_test_battery_power", "power", "W"),
+        ("sensor.cala_test_battery_soc", "battery", "%"),
+        ("binary_sensor.cala_test_grid_status", "connectivity", None),
+    ],
+)
+def test_template_entity_classes_and_units(entity_id, device_class, unit):
+    ent = TEMPLATES[entity_id]
+    assert ent["device_class"] == device_class
+    assert ent.get("unit_of_measurement") == unit
+    assert unit is None or unit in publish.SUPPORTED_POWER_UNITS | {"%"}
+
+
+def test_every_template_has_an_availability_toggle_the_package_defines():
+    for entity_id, ent in TEMPLATES.items():
+        toggles = re.findall(r"input_boolean\.\w+", ent["availability"])
+        assert toggles and set(toggles) <= PACKAGE_IDS, entity_id
+
+
+def test_triggers_rewrite_on_every_input_and_faster_than_any_publish_interval():
+    (block,) = PACKAGE["template"]
+    triggers = block["triggers"]
+    watched = {e for t in triggers if t["trigger"] == "state" for e in t["entity_id"]}
+    inputs = {i for i in PACKAGE_IDS if i.startswith(("input_number.", "input_select.", "input_boolean."))}
+    assert watched == inputs
+    (pattern,) = [t for t in triggers if t["trigger"] == "time_pattern"]
+    assert int(pattern["seconds"].lstrip("/")) <= MIN_PUBLISH_INTERVAL_S
+
+
+def test_readme_grid_status_option_is_the_package_binary_sensor():
+    assert README_GRID_STATUS == {const.CONF_GRID_STATUS_ENTITY: "binary_sensor.cala_test_grid_status"}
+    assert const.CONF_GRID_STATUS_ENTITY not in energy_sources.CONTEXT_SOURCE_KEYS
+
+
+def test_readme_options_are_real_option_names_and_values():
+    allowed_signs = {
+        const.CONF_GRID_POWER_SIGN: const.GRID_POWER_SIGNS,
+        const.CONF_BATTERY_POWER_SIGN: const.BATTERY_POWER_SIGNS,
+    }
+    assert README_OPTIONS.get(const.CONF_MANUAL_CONTEXT) is True
+    assert const.CONF_GRID_STATUS_ENTITY not in README_OPTIONS
+    for key, value in README_OPTIONS.items():
+        if key == const.CONF_MANUAL_CONTEXT:
+            continue
+        if key in allowed_signs:
+            assert value in allowed_signs[key]
+        else:
+            assert key in energy_sources.CONTEXT_SOURCE_KEYS
+            assert value in TEMPLATES
+
+
+def test_readme_energy_settings_name_package_sensors():
+    named = {
+        v for source in README_ENERGY["energy_sources"]
+        for k, v in source.items() if k.startswith("stat_")
+    }
+    assert named <= PACKAGE_IDS
+
+
+def test_energy_settings_plus_grid_status_option_cover_every_test_sensor():
+    mapped = set(publish.context_entity_ids(ENERGY_OPTIONS))
+    assert mapped == {
+        "sensor.cala_test_solar_production",
+        "sensor.cala_test_grid_power",
+        "sensor.cala_test_battery_power",
+        "sensor.cala_test_battery_soc",
+        "binary_sensor.cala_test_grid_status",
+    }
+
+
+def test_kwh_meters_integrate_the_matching_power_sensor():
+    for meter_id, meter in METERS.items():
+        assert meter["platform"] == "integration"
+        assert meter["unit_prefix"] == "k"
+        source = meter["source"]
+        assert source in TEMPLATES, meter_id
+        assert meter_id.removesuffix("_energy") == source.removesuffix("_power").removesuffix("_production")
+
+
+# ---- The worked example, through the real publisher ----
+
+T0 = datetime.fromtimestamp(README_PAYLOAD["ts"], tz=timezone.utc)
+EXAMPLE_INPUTS = {
+    "input_number.cala_test_pv_w": "6000.0",
+    "input_number.cala_test_grid_magnitude_w": "2500.0",
+    "input_select.cala_test_grid_direction": "Export",
+    "input_number.cala_test_battery_soc": "95.0",
+    "input_number.cala_test_battery_magnitude_w": "800.0",
+    "input_select.cala_test_battery_direction": "Charge",
+    "input_boolean.cala_test_grid_connected": "on",
+}
+
+
+@dataclass
+class FakeState:
+    state: str
+    attributes: dict = field(default_factory=dict)
+    last_updated: datetime = T0
+    last_reported: datetime = T0
+
+
+class FakeHass:
+    def __init__(self, states: dict):
+        self.states = self
+        self._states = states
+
+    def get(self, entity_id):
+        return self._states.get(entity_id)
+
+
+DIRECTION_RE = re.compile(r"\{\{ (.+?) if is_state\('(input_select\.\w+)', '(\w+)'\) else (.+?) \}\}")
+
+
+def _render(inputs: dict, unavailable: set[str] = frozenset()) -> FakeHass:
+    """Evaluate the package's templates for the subset of Jinja they use."""
+    states = {}
+    for entity_id, ent in TEMPLATES.items():
+        if entity_id in unavailable:
+            states[entity_id] = FakeState("unavailable")
+            continue
+        sources = re.findall(r"input_\w+\.\w+", ent["state"])
+        (source,) = [s for s in sources if not s.startswith("input_select.")]
+        raw = inputs[source]
+        chosen = DIRECTION_RE.search(ent["state"])
+        if entity_id.startswith("binary_sensor."):
+            value = "on" if raw == "on" else "off"
+        elif chosen:
+            # {{ A if is_state('input_select.x', 'Option') else B }}, A/B in w, 0 - w, 0
+            then, select, option, otherwise = chosen.groups()
+            pick = then if inputs[select] == option else otherwise
+            w = float(raw)
+            value = str({"w": w, "0 - w": 0 - w, "0": 0.0}[pick])
+        else:
+            value = str(float(raw))
+        unit = ent.get("unit_of_measurement")
+        states[entity_id] = FakeState(value, {"unit_of_measurement": unit} if unit else {})
+    return FakeHass(states)
+
+
+def _payload(hass, opts=ENERGY_OPTIONS) -> dict | None:
+    ctx = publish.build_context(hass, opts)
+    ts = publish._source_ts(hass, opts)
+    if not ctx or ts is None:
+        return None
+    return {"v": publish.PAYLOAD_VERSION, "ts": ts, "context": ctx}
+
+
+@pytest.mark.parametrize(
+    "select, options, magnitude, sensor",
+    [
+        ("cala_test_grid_direction", ["Import", "Export"], "cala_test_grid_magnitude_w", "sensor.cala_test_grid_power"),
+        (
+            "cala_test_battery_direction",
+            ["Charge", "Discharge"],
+            "cala_test_battery_magnitude_w",
+            "sensor.cala_test_battery_power",
+        ),
+    ],
+)
+def test_power_direction_is_a_selector_and_the_power_slider_is_never_negative(select, options, magnitude, sensor):
+    direction = PACKAGE["input_select"][select]
+    assert direction["options"] == options
+    assert direction["initial"] == options[0]
+    assert PACKAGE["input_number"][magnitude]["min"] == 0
+    assert DIRECTION_RE.search(TEMPLATES[sensor]["state"]).group(2) == f"input_select.{select}"
+
+
+@pytest.mark.parametrize(
+    "direction, magnitude, power_w, importing, exporting",
+    [("Import", "1400.0", 1400.0, True, False), ("Export", "1400.0", -1400.0, False, True)],
+)
+def test_grid_direction_reaches_the_payload(direction, magnitude, power_w, importing, exporting):
+    inputs = dict(
+        EXAMPLE_INPUTS,
+        **{
+            "input_select.cala_test_grid_direction": direction,
+            "input_number.cala_test_grid_magnitude_w": magnitude,
+        },
+    )
+    hass = _render(inputs)
+    assert float(hass.get("sensor.cala_test_grid_import_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_grid_export_power").state) == max(-power_w, 0.0)
+    grid = _payload(hass, ENERGY_OPTIONS)["context"]["grid"]
+    assert grid["power_w"] == power_w
+    assert grid["importing"] is importing
+    assert grid["exporting"] is exporting
+
+
+@pytest.mark.parametrize(
+    "direction, power_w, charging, discharging",
+    [("Charge", 600.0, True, False), ("Discharge", -600.0, False, True)],
+)
+def test_battery_direction_reaches_the_payload(direction, power_w, charging, discharging):
+    inputs = dict(
+        EXAMPLE_INPUTS,
+        **{
+            "input_select.cala_test_battery_direction": direction,
+            "input_number.cala_test_battery_magnitude_w": "600.0",
+        },
+    )
+    hass = _render(inputs)
+    # HA's sign on the sensor (+ = discharging); the heater's sign in the payload.
+    assert float(hass.get("sensor.cala_test_battery_power").state) == -power_w
+    assert float(hass.get("sensor.cala_test_battery_charge_power").state) == max(power_w, 0.0)
+    assert float(hass.get("sensor.cala_test_battery_discharge_power").state) == max(-power_w, 0.0)
+    battery = _payload(hass, ENERGY_OPTIONS)["context"]["battery"]
+    assert battery == _payload(hass, README_OPTIONS)["context"]["battery"]
+    assert battery["power_w"] == power_w
+    assert battery["charging"] is charging
+    assert battery["discharging"] is discharging
+
+
+def test_readme_worked_example_is_what_the_publisher_sends():
+    assert _payload(_render(EXAMPLE_INPUTS), ENERGY_OPTIONS) == README_PAYLOAD
+
+
+def test_hand_mapped_example_sends_the_same_payload():
+    hand_mapped = {**README_OPTIONS, **README_GRID_STATUS}
+    assert _payload(_render(EXAMPLE_INPUTS), hand_mapped) == README_PAYLOAD
+
+
+def test_without_a_grid_status_option_grid_disconnected_is_left_out():
+    opts = {k: v for k, v in ENERGY_OPTIONS.items() if k != const.CONF_GRID_STATUS_ENTITY}
+    grid = _payload(_render(EXAMPLE_INPUTS), opts)["context"]["grid"]
+    assert "grid_disconnected" not in grid
+
+
+def test_energy_path_keeps_only_grid_status_when_grid_power_is_unavailable():
+    hass = _render(EXAMPLE_INPUTS, {"sensor.cala_test_grid_power"})
+    assert _payload(hass, ENERGY_OPTIONS)["context"]["grid"] == {"grid_disconnected": False}
+    without_status = {k: v for k, v in ENERGY_OPTIONS.items() if k != const.CONF_GRID_STATUS_ENTITY}
+    assert "grid" not in _payload(hass, without_status)["context"]
+
+
+@pytest.mark.parametrize(
+    "unavailable, gone",
+    [
+        ({"sensor.cala_test_solar_production"}, ["solar"]),
+        ({"sensor.cala_test_grid_power"}, ["grid.power_w", "grid.import_w"]),
+        ({"binary_sensor.cala_test_grid_status"}, ["grid.grid_disconnected"]),
+        ({"sensor.cala_test_battery_soc"}, ["battery.soc_percent"]),
+        ({"sensor.cala_test_battery_power"}, ["battery.power_w", "battery.charging"]),
+    ],
+)
+def test_missing_data_table(unavailable, gone):
+    ctx = _payload(_render(EXAMPLE_INPUTS, unavailable))["context"]
+    for path in gone:
+        section, _, key = path.partition(".")
+        assert section not in ctx or (key and key not in ctx[section])
+
+
+def test_all_sensors_unavailable_publishes_nothing():
+    assert _payload(_render(EXAMPLE_INPUTS, set(TEMPLATES))) is None
+
+
+def test_grid_connected_off_sends_grid_disconnected():
+    inputs = dict(EXAMPLE_INPUTS, **{"input_boolean.cala_test_grid_connected": "off"})
+    assert _payload(_render(inputs))["context"]["grid"]["grid_disconnected"] is True
