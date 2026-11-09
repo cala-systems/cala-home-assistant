@@ -24,7 +24,7 @@ body:
     id: integration-version
     attributes:
       label: Integration version
-      description: HACS → Cala, or `custom_components/cala/manifest.json`
+      description: Settings → Marketplace → Cala (or HACS → Cala before 2026.11), or `custom_components/cala/manifest.json`
       placeholder: v0.3.0
     validations:
       required: true
@@ -47,7 +47,8 @@ body:
     attributes:
       label: How is the integration installed?
       options:
-        - HACS
+        - Home Assistant Marketplace
+        - HACS (before 2026.11)
         - Manual copy
   - type: dropdown
     id: network

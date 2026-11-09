@@ -2,7 +2,7 @@
 
 [![Validate](https://github.com/cala-systems/cala-home-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/cala-systems/cala-home-assistant/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/cala-systems/cala-home-assistant?sort=semver)](https://github.com/cala-systems/cala-home-assistant/releases)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![Home Assistant Marketplace](https://img.shields.io/badge/Home%20Assistant-Marketplace-41BDF5.svg)](https://www.home-assistant.io/integrations/marketplace/)
 [![License: MIT](https://img.shields.io/github/license/cala-systems/cala-home-assistant)](LICENSE)
 
 Home Assistant custom integration for Cala heat pump water heaters: local MQTT pairing, live telemetry, boost control, and time-of-use scheduling.
@@ -17,7 +17,7 @@ Before starting:
 
 If you do not have MQTT installed:
 
-1. Go to **Settings** → **Add-ons**
+1. Go to **Settings** → **Apps**
 2. Install **Mosquitto broker**
 3. Start it
 
@@ -25,14 +25,15 @@ If you do not have MQTT installed:
 
 Install the Cala **integration** (the Home Assistant component that connects to your Cala water heater). The physical device is set up separately in the Setup section below.
 
-### Option A: HACS
+### Option A: Home Assistant Marketplace (Home Assistant 2026.11 and later)
 
-1. Install HACS
-2. HACS → Integrations → ⋮ → Custom repositories
-3. Add this repository URL
-4. Category: Integration
-5. Install "Cala"
-6. Restart Home Assistant
+1. Go to **Settings** → **Marketplace** (the first time, accept the notice: **I understand the risks and agree**)
+2. Select **Add from link** (top right)
+3. Under **GitHub link**, enter `https://github.com/cala-systems/cala-home-assistant` and select **Add** (if asked for a **Type**, choose **Integration**)
+4. Open **Cala**, select **Install**, then **Install** again to confirm
+5. Restart Home Assistant if it asks you to
+
+**Before 2026.11 (HACS):** HACS → ⋮ → **Custom repositories** → add this repository URL with category **Integration** → install **Cala** → restart Home Assistant.
 
 ### Option B: Manual copy
 
@@ -75,9 +76,9 @@ During setup, you will be prompted for:
 
 These must match your MQTT broker credentials.
 
-**If using Mosquitto Add-on:**
+**If using the Mosquitto broker app:**
 
-1. Go to **Settings** → **Add-ons** → **Mosquitto broker**
+1. Go to **Settings** → **Apps** → **Mosquitto broker**
 2. Open the **Configuration** tab
 3. Create a new login and store the username and password for Cala setup
 
